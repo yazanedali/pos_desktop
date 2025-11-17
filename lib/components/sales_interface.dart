@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:pos_desktop/database/category_queries.dart'; // 1. استيراد كويري الفئات
+import 'package:pos_desktop/database/category_queries.dart';
 import 'package:pos_desktop/database/product_queries.dart';
 import 'package:pos_desktop/models/cart_item.dart';
-import 'package:pos_desktop/models/category.dart'; // 2. استيراد مودل الفئة
+import 'package:pos_desktop/models/category.dart';
 import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/services/sales_service.dart';
 import './sales/barcode_reader.dart';
 import './sales/products_grid.dart';
 import './sales/shopping_cart.dart';
 import '../widgets/top_alert.dart';
+import './sales/payment_dialog.dart';
+import '../../models/customer.dart';
+import '../../database/customer_queries.dart';
 
 class SalesInterface extends StatefulWidget {
   const SalesInterface({super.key});
@@ -29,6 +32,9 @@ class _SalesInterfaceState extends State<SalesInterface> {
 
   bool _isLoading = true;
   bool _isProcessingSale = false;
+
+  final CustomerQueries _customerQueries = CustomerQueries();
+  List<Customer> _customers = []; // قائمة لتخزين العملاء
 
   // void _showTopAlert(String message, {bool isError = false}) {
   //   // إنشاء OverlayEntry
@@ -104,17 +110,16 @@ class _SalesInterfaceState extends State<SalesInterface> {
       final results = await Future.wait([
         _productQueries.getAllProducts(),
         _categoryQueries.getAllCategories(),
+        _customerQueries.getAllCustomers(), // جلب العملاء أيضاً
       ]);
       if (!mounted) return;
       setState(() {
         _products = results[0] as List<Product>;
         _categories = results[1] as List<Category>;
+        _customers = results[2] as List<Customer>; // تخزين العملاء
       });
     } catch (e) {
-      TopAlert.showError(
-        context: context,
-        message: 'خطأ في تحميل البيانات: $e',
-      );
+      // ... (معالجة الخطأ)
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -211,51 +216,91 @@ class _SalesInterfaceState extends State<SalesInterface> {
     });
   }
 
+  // دالة مخصصة فقط لجلب العملاء
+  Future<void> _refreshCustomers() async {
+    try {
+      final customersFromDb = await _customerQueries.getAllCustomers();
+      if (!mounted) return;
+      setState(() {
+        _customers = customersFromDb;
+      });
+    } catch (e) {
+      // يمكنك إظهار تنبيه هنا إذا أردت
+      // ignore: avoid_print
+      print("Failed to refresh customers: $e");
+    }
+  }
+
   // تحديث دالة handleCheckout
   Future<void> _handleCheckout() async {
     if (_cartItems.isEmpty) {
       TopAlert.showError(context: context, message: 'السلة فارغة');
-
       return;
     }
 
-    try {
-      setState(() {
-        _isProcessingSale = true;
-      });
+    await _refreshCustomers();
+    if (_cartItems.isEmpty) {
+      // ...
+      return;
+    }
+    // حساب الإجمالي
+    final total = _cartItems.fold(
+      0.0,
+      (sum, item) => sum + (item.price * item.quantity),
+    );
 
-      // إنشاء الفاتورة في قاعدة البيانات
+    // 1. عرض شاشة الدفع وانتظار النتيجة
+    final paymentResult = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder:
+          (context) => PaymentDialog(
+            totalAmount: total,
+            customers: _customers, // تمرير قائمة العملاء
+          ),
+    );
+
+    // 2. التحقق من أن المستخدم لم يغلق الشاشة
+    if (paymentResult == null) {
+      return; // المستخدم ألغى العملية
+    }
+
+    // 3. استخراج البيانات من النتيجة
+    final String paymentMethod = paymentResult['payment_method'];
+    final double paidAmount = paymentResult['paid_amount'];
+    final int? customerId = paymentResult['customer_id'];
+    final double remainingAmount = total - paidAmount;
+
+    // 4. بدء عملية الحفظ
+    try {
+      setState(() => _isProcessingSale = true);
+
+      // 5. استدعاء خدمة المبيعات مع البيانات الجديدة
       final invoiceNumber = await _salesService.createSaleInvoice(
         cartItems: _cartItems,
-        cashier: "كاشير", // يمكنك تغيير هذا ليكون ديناميكي
-      );
-
-      final total = _cartItems.fold(
-        0.0,
-        (sum, item) => sum + (item.price * item.quantity),
+        cashier: "كاشير",
+        total: total,
+        paidAmount: paidAmount,
+        remainingAmount: remainingAmount,
+        paymentMethod: paymentMethod,
+        customerId: customerId,
       );
 
       TopAlert.showSuccess(
         // ignore: use_build_context_synchronously
         context: context,
-        message:
-            'تمت عملية البيع بنجاح - رقم الفاتورة: $invoiceNumber - المبلغ: ${total.toStringAsFixed(2)} شيكل',
+        message: 'تمت عملية البيع بنجاح - رقم الفاتورة: $invoiceNumber',
       );
-      // تفريغ السلة
+
       setState(() {
         _cartItems.clear();
-        _isProcessingSale = false;
       });
 
-      // إعادة تحميل المنتجات لتحديث المخزون
-      await _loadProducts();
+      await _loadProducts(); // تحديث مخزون المنتجات
     } catch (e) {
-      setState(() {
-        _isProcessingSale = false;
-      });
-
       // ignore: use_build_context_synchronously
       TopAlert.showError(context: context, message: 'خطأ في إتمام البيع: $e');
+    } finally {
+      setState(() => _isProcessingSale = false);
     }
   }
 

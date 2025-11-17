@@ -72,13 +72,15 @@ class DatabaseHelper {
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         total REAL NOT NULL,
+        paid_amount REAL NOT NULL,          -- المبلغ المدفوع
+        remaining_amount REAL NOT NULL,     -- المبلغ المتبقي (الدين)
         cashier TEXT NOT NULL,
-        customer_name TEXT,
-        payment_method TEXT DEFAULT 'نقدي',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        customer_id INTEGER,                -- معرّف العميل (للربط)
+        payment_method TEXT DEFAULT 'نقدي', -- 'نقدي' أو 'آجل'
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers (id) -- ربط العميل
       )
     ''');
-
     // جدول عناصر فواتير المبيعات
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sales_invoice_items (
@@ -119,6 +121,16 @@ class DatabaseHelper {
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
         FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        address TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     ''');
   }

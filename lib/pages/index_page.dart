@@ -4,6 +4,7 @@ import '../components/sales_interface.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
 import '../components/reports_section.dart';
+import '../components/debtors_page.dart'; // <-- الخطوة 1: استيراد الصفحة الجديدة
 
 class IndexPage extends StatefulWidget {
   const IndexPage({super.key});
@@ -13,30 +14,36 @@ class IndexPage extends StatefulWidget {
 }
 
 class _IndexPageState extends State<IndexPage> {
-  int _selectedIndex = 1;
+  int _selectedIndex = 1; // تبدأ الواجهة من نقطة البيع
 
+  // الخطوة 2: إضافة الصفحة الجديدة إلى قائمة الصفحات
   final List<Widget> _pages = [
     const ProductManagementPage(),
     const SalesInterface(),
     const SalesInvoices(),
     const PurchaseInvoices(),
     const ReportsSection(),
+    const DebtorsPage(), // <-- أضف هذا السطر
   ];
 
+  // الخطوة 3: إضافة عنوان الصفحة الجديدة
   final List<String> _pageTitles = [
     'المنتجات',
     'نقطة البيع',
     'فواتير المبيعات',
     'فواتير الشراء',
     'التقارير',
+    'العملاء والديون', // <-- أضف هذا السطر
   ];
 
+  // الخطوة 4: إضافة أيقونة الصفحة الجديدة
   final List<IconData> _pageIcons = [
     Icons.inventory_2_outlined,
     Icons.shopping_cart_checkout,
     Icons.receipt_long_outlined,
     Icons.shopping_bag_outlined,
     Icons.analytics_outlined,
+    Icons.people_alt_outlined, // <-- أضف هذا السطر
   ];
 
   @override
@@ -46,15 +53,13 @@ class _IndexPageState extends State<IndexPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // --- 1. الشريط العلوي الجديد (Header) ---
             _buildHeader(),
-            // --- 2. شريط التنقل الذي قمنا بعمله سابقًا ---
             _buildCustomNavigationBar(),
-            // --- 3. عرض الصفحة المحددة ---
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                child: _pages[_selectedIndex],
+                // عرض الصفحة المحددة
+                child: IndexedStack(index: _selectedIndex, children: _pages),
               ),
             ),
           ],
@@ -62,6 +67,10 @@ class _IndexPageState extends State<IndexPage> {
       ),
     );
   }
+
+  // ... باقي الدوال (_buildHeader, _buildStatusChip, _buildCustomNavigationBar, _buildNavItem)
+  // تبقى كما هي تماماً بدون أي تغيير.
+  // ... (انسخها من الكود الأصلي في سؤالك)
 
   // --- === دالة جديدة لبناء الشريط العلوي (Header) === ---
   Widget _buildHeader() {
@@ -231,8 +240,6 @@ class _IndexPageState extends State<IndexPage> {
                 ],
               ),
             ),
-
-            // -------- المؤشر (Indicator) --------
             AnimatedContainer(
               duration: const Duration(milliseconds: 250),
               margin: const EdgeInsets.only(top: 6),
