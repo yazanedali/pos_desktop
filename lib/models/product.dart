@@ -1,9 +1,12 @@
+import 'package:pos_desktop/models/product_package.dart';
+
 class Product {
   final int? id;
   final String name;
   final double price;
-  int stock; // جعلناه غير نهائي لتسهيل تحديثه
+  double stock;
   final String? barcode;
+  List<ProductPackage> packages;
 
   // --- === التعديل الرئيسي === ---
   final int? categoryId; // أضفنا هذا الحقل لتخزين رقم الفئة
@@ -19,13 +22,14 @@ class Product {
     this.id,
     required this.name,
     required this.price,
-    this.stock = 0,
+    this.stock = 0.0,
     this.barcode,
     this.categoryId, // تمت إضافته للمُنشئ
     this.category,
     this.isActive = true,
     this.createdAt,
     this.updatedAt,
+    this.packages = const [],
   });
 
   // Convert a Product to a Map for the database
@@ -50,7 +54,7 @@ class Product {
       name: map['name'],
       price:
           map['price'] is int ? (map['price'] as int).toDouble() : map['price'],
-      stock: map['stock'],
+      stock: (map['stock'] as num? ?? 0).toDouble(),
       barcode: map['barcode'],
       categoryId:
           map['category_id'], // --- تعديل: قراءة الـ ID من قاعدة البيانات
@@ -66,13 +70,14 @@ class Product {
     int? id,
     String? name,
     double? price,
-    int? stock,
+    double? stock,
     String? barcode,
     int? categoryId, // تمت إضافته هنا
     String? category,
     bool? isActive,
     String? createdAt,
     String? updatedAt,
+    List<ProductPackage>? packages,
   }) {
     return Product(
       id: id ?? this.id,
@@ -85,6 +90,7 @@ class Product {
       isActive: isActive ?? this.isActive,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      packages: packages ?? this.packages,
     );
   }
 

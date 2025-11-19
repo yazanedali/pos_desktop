@@ -59,7 +59,7 @@ class _IndexPageState extends State<IndexPage> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                 // عرض الصفحة المحددة
-                child: IndexedStack(index: _selectedIndex, children: _pages),
+                child: _pages[_selectedIndex],
               ),
             ),
           ],
@@ -68,11 +68,6 @@ class _IndexPageState extends State<IndexPage> {
     );
   }
 
-  // ... باقي الدوال (_buildHeader, _buildStatusChip, _buildCustomNavigationBar, _buildNavItem)
-  // تبقى كما هي تماماً بدون أي تغيير.
-  // ... (انسخها من الكود الأصلي في سؤالك)
-
-  // --- === دالة جديدة لبناء الشريط العلوي (Header) === ---
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),

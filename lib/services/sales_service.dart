@@ -41,29 +41,39 @@ class SalesService {
           'created_at': now.toIso8601String(),
         });
 
-        // 2. إدخال عناصر الفاتورة وتحديث المخزون (هذا الجزء لم يتغير)
         for (final item in cartItems) {
-          // إدخال عنصر الفاتورة
+          String finalProductName;
+
+          if (item.unitName == 'حبة') {
+            // <-- تأكد من مطابقة هذا الاسم
+            finalProductName = item.name;
+          }
+          // إذا كانت أي وحدة أخرى، قم بدمج الاسمين.
+          else {
+            finalProductName = '${item.name} (${item.unitName})';
+          }
           await txn.insert('sales_invoice_items', {
             'invoice_id': invoiceId,
             'product_id': item.id,
-            'product_name': item.name,
+            'product_name': finalProductName,
             'price': item.price,
             'quantity': item.quantity,
             'total': item.price * item.quantity,
           });
 
-          // تحديث مخزون المنتج
+          // حساب الكمية الإجمالية للخصم من المخزون
+          final double quantityToDecrement = item.unitQuantity * item.quantity;
+
+          // تحديث مخزون المنتج بالكمية الصحيحة
           await txn.rawUpdate(
             'UPDATE products SET stock = stock - ? WHERE id = ?',
-            [item.quantity, item.id],
+            [quantityToDecrement, item.id],
           );
         }
 
-        return invoiceNumber;
+        return "invoiceNumber"; // return invoiceNumber;
       });
     } catch (e) {
-      // إلقاء استثناء مع رسالة خطأ واضحة
       throw Exception('فشل في إنشاء الفاتورة: $e');
     }
   }

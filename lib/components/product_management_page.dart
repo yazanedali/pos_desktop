@@ -46,35 +46,53 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
     });
   }
 
-  void _showProductDialog({Product? product}) {
+  void _showProductDialog({Product? product}) async {
+    Product productWithPackages = product ?? Product(name: '', price: 0.0);
+
+    // إذا كان المنتج موجوداً، قم بجلب حزمه
+    if (product != null && product.id != null) {
+      final packages = await _productQueries.getPackagesForProduct(product.id!);
+      productWithPackages.packages = packages;
+    }
+
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder:
           (ctx) => ProductDialog(
-            product: product,
+            product: productWithPackages, // تمرير المنتج مع حزمه
             categories: _categories,
-            onSave: (Product newProduct) async {
+            onSave: (Product productToSave) async {
               Navigator.of(ctx).pop();
               try {
                 if (product != null) {
-                  await _productQueries.updateProduct(product.id!, newProduct);
+                  await _productQueries.updateProduct(
+                    product.id!,
+                    productToSave,
+                  );
+                  // ... (رسالة النجاح)
                   TopAlert.showSuccess(
                     // ignore: use_build_context_synchronously
                     context: context,
-                    message: "تم تحديث المنتج بنجاح",
+                    message: "تم تحديث المنتج '${productToSave.name}' بنجاح",
                   );
                 } else {
-                  await _productQueries.createProduct(newProduct);
+                  await _productQueries.createProduct(productToSave);
+                  // ... (رسالة النجاح)
                   TopAlert.showSuccess(
                     // ignore: use_build_context_synchronously
                     context: context,
-                    message: "تم إضافة المنتج بنجاح",
+                    message: "تم إضافة المنتج '${productToSave.name}' بنجاح",
                   );
                 }
                 await _loadData();
               } catch (e) {
-                // ignore: use_build_context_synchronously
-                TopAlert.showError(context: context, message: "حدث خطأ: $e");
+                TopAlert.showError(
+                  // ignore: use_build_context_synchronously
+                  context: context,
+                  message: "حدث خطأ أثناء الحفظ: $e",
+                );
               }
             },
             onCancel: () => Navigator.of(ctx).pop(),

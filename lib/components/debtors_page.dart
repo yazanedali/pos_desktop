@@ -47,6 +47,7 @@ class _DebtorsPageState extends State<DebtorsPage> {
         await _customerQueries.insertCustomer(newCustomer);
 
         TopAlert.showSuccess(
+          // ignore: use_build_context_synchronously
           context: context,
           message: 'تمت إضافة العميل "${newCustomer.name}" بنجاح',
         );
@@ -55,6 +56,7 @@ class _DebtorsPageState extends State<DebtorsPage> {
         _loadDebtorsData();
       } catch (e) {
         TopAlert.showError(
+          // ignore: use_build_context_synchronously
           context: context,
           message: 'فشل في إضافة العميل: $e',
         );
@@ -138,8 +140,10 @@ class _DebtorsPageState extends State<DebtorsPage> {
                     amount,
                   );
 
+                  // ignore: use_build_context_synchronously
                   Navigator.pop(context);
                   TopAlert.showSuccess(
+                    // ignore: use_build_context_synchronously
                     context: context,
                     message: 'تم تسديد ${amount.toStringAsFixed(2)} شيكل بنجاح',
                   );

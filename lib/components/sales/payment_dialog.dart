@@ -95,11 +95,13 @@ class _PaymentDialogState extends State<PaymentDialog> {
         });
 
         TopAlert.showSuccess(
+          // ignore: use_build_context_synchronously
           context: context,
           message: 'تمت إضافة العميل واختياره',
         );
       } catch (e) {
         TopAlert.showError(
+          // ignore: use_build_context_synchronously
           context: context,
           message: 'فشل في إضافة العميل: $e',
         );

@@ -63,7 +63,7 @@ class SaleInvoiceItem {
   final int productId;
   final String productName;
   final double price;
-  final int quantity;
+  final double quantity;
   final double total;
 
   SaleInvoiceItem({
@@ -83,11 +83,9 @@ class SaleInvoiceItem {
       invoiceId: map['invoice_id'],
       productId: map['product_id'],
       productName: map['product_name'],
-      price:
-          map['price'] is int ? (map['price'] as int).toDouble() : map['price'],
-      quantity: map['quantity'],
-      total:
-          map['total'] is int ? (map['total'] as int).toDouble() : map['total'],
+      price: (map['price'] as num).toDouble(),
+      quantity: (map['quantity'] as num).toDouble(),
+      total: (map['total'] as num).toDouble(),
     );
   }
 

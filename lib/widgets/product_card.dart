@@ -30,12 +30,34 @@ class ProductCard extends StatelessWidget {
     return Color(int.parse(hex, radix: 16));
   }
 
+  // دالة جديدة لتنسيق الكمية
+  String _formatStock(double stock) {
+    // إذا كان الرقم صحيحاً، عرضه بدون فواصل عشرية
+    if (stock % 1 == 0) {
+      return stock.toInt().toString();
+    }
+    // إذا كان عشرياً، عرضه بحد أقصى منزلتين عشريتين
+    return stock.toStringAsFixed(2).replaceAll(RegExp(r'\.?0*$'), '');
+  }
+
+  // دالة جديدة لتحديد حجم النص بناءً على طول الرقم
+  double _getStockFontSize(String stockText) {
+    if (stockText.length <= 2) return 12;
+    if (stockText.length == 3) return 11;
+    if (stockText.length == 4) return 10;
+    return 9;
+  }
+
   @override
   Widget build(BuildContext context) {
     final categoryColor =
         product.category != null
             ? _getCategoryColor(product.category!)
             : Colors.grey;
+
+    // تنسيق الكمية
+    final formattedStock = _formatStock(product.stock);
+    final stockFontSize = _getStockFontSize(formattedStock);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -92,20 +114,29 @@ class ProductCard extends StatelessWidget {
                               ),
                             ),
 
+                            // دائرة المخزون - معدلة لتكون متجاوبة
                             Container(
-                              width: 32,
-                              height: 32,
+                              padding: const EdgeInsets.all(6),
                               decoration: const BoxDecoration(
                                 color: Colors.black,
                                 shape: BoxShape.circle,
                               ),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
                               alignment: Alignment.center,
-                              child: Text(
-                                product.stock.toString(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  formattedStock,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: stockFontSize,
+                                    height: 1.0,
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
                               ),
                             ),
@@ -128,6 +159,8 @@ class ProductCard extends StatelessWidget {
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),

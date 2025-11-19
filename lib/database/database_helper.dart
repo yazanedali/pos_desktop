@@ -54,7 +54,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         price REAL NOT NULL,
-        stock INTEGER DEFAULT 0,
+        stock REAL DEFAULT 0,  -- <--- تم حذف كلمة REAL المكررة
         barcode TEXT UNIQUE,
         category_id INTEGER,
         is_active INTEGER DEFAULT 1,
@@ -72,15 +72,16 @@ class DatabaseHelper {
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         total REAL NOT NULL,
-        paid_amount REAL NOT NULL,          -- المبلغ المدفوع
-        remaining_amount REAL NOT NULL,     -- المبلغ المتبقي (الدين)
+        paid_amount REAL NOT NULL,
+        remaining_amount REAL NOT NULL,
         cashier TEXT NOT NULL,
-        customer_id INTEGER,                -- معرّف العميل (للربط)
-        payment_method TEXT DEFAULT 'نقدي', -- 'نقدي' أو 'آجل'
+        customer_id INTEGER,
+        payment_method TEXT DEFAULT 'نقدي',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (customer_id) REFERENCES customers (id) -- ربط العميل
+        FOREIGN KEY (customer_id) REFERENCES customers (id)
       )
     ''');
+
     // جدول عناصر فواتير المبيعات
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sales_invoice_items (
@@ -89,7 +90,7 @@ class DatabaseHelper {
         product_id INTEGER NOT NULL,
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
-        quantity INTEGER NOT NULL,
+        quantity REAL NOT NULL, -- <--- تأكد أن هذا أيضاً REAL
         total REAL NOT NULL,
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
@@ -116,7 +117,7 @@ class DatabaseHelper {
         product_name TEXT NOT NULL,
         barcode TEXT,
         category TEXT,
-        quantity INTEGER NOT NULL,
+        quantity REAL NOT NULL, -- <--- تأكد أن هذا أيضاً REAL
         purchase_price REAL NOT NULL,
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
@@ -131,6 +132,18 @@ class DatabaseHelper {
         phone TEXT,
         address TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        contained_quantity REAL NOT NULL,
+        price REAL NOT NULL,
+        barcode TEXT,
+        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
       )
     ''');
   }
