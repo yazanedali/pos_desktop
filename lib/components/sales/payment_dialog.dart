@@ -69,22 +69,27 @@ class _PaymentDialogState extends State<PaymentDialog> {
   }
 
   Future<void> _showAndHandleAddCustomer() async {
-    final newCustomerFromDialog = await showDialog<Customer>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => const AddCustomerDialog(),
     );
 
-    if (newCustomerFromDialog != null && mounted) {
+    if (result != null && mounted) {
       try {
-        final newId = await _customerQueries.insertCustomer(
-          newCustomerFromDialog,
+        // تحويل الـ Map إلى كائن Customer
+        final newCustomer = Customer(
+          name: result['name'] ?? '',
+          phone: result['phone'],
+          address: result['address'],
         );
+
+        final newId = await _customerQueries.insertCustomer(newCustomer);
 
         final newCompleteCustomer = Customer(
           id: newId,
-          name: newCustomerFromDialog.name,
-          phone: newCustomerFromDialog.phone,
-          address: newCustomerFromDialog.address,
+          name: newCustomer.name,
+          phone: newCustomer.phone,
+          address: newCustomer.address,
         );
 
         setState(() {

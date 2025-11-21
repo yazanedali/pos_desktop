@@ -7,11 +7,29 @@ class ProductsGrid extends StatefulWidget {
   final List<Category> categories;
   final void Function(Product) onProductAdded;
 
+  // خصائص Lazy Loading الجديدة
+  final bool hasMore;
+  final bool isLoadingMore;
+  final VoidCallback? onLoadMore;
+  final Function(String)? onSearch;
+  final Function(int?)? onCategorySelected;
+  final int? selectedCategoryId;
+  final String searchTerm;
+  final VoidCallback? onClearFilters;
+
   const ProductsGrid({
     super.key,
     required this.products,
     required this.categories,
     required this.onProductAdded,
+    this.hasMore = false,
+    this.isLoadingMore = false,
+    this.onLoadMore,
+    this.onSearch,
+    this.onCategorySelected,
+    this.selectedCategoryId,
+    this.searchTerm = "",
+    this.onClearFilters,
   });
 
   @override
@@ -19,74 +37,105 @@ class ProductsGrid extends StatefulWidget {
 }
 
 class _ProductsGridState extends State<ProductsGrid> {
-  String _searchTerm = "";
+  final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
-  // --- === 1. تعديل منطق البحث ليشمل الباركود والفئة === ---
-  List<Product> get _filteredProducts {
-    if (_searchTerm.isEmpty) return widget.products;
+  @override
+  void initState() {
+    super.initState();
+    _searchController.text = widget.searchTerm;
+    _setupScrollListener();
+  }
 
-    final lowerCaseSearchTerm = _searchTerm.toLowerCase();
+  @override
+  void didUpdateWidget(ProductsGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchTerm != widget.searchTerm) {
+      _searchController.text = widget.searchTerm;
+    }
+  }
 
-    return widget.products.where((product) {
-      // البحث في اسم المنتج
-      final nameMatch = product.name.toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
+  void _setupScrollListener() {
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels ==
+          _scrollController.position.maxScrollExtent) {
+        widget.onLoadMore?.call();
+      }
+    });
+  }
 
-      // البحث في الباركود (مع التحقق من أنه ليس null)
-      final barcodeMatch = (product.barcode ?? '').toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
-      // البحث في اسم الفئة
-      final category = widget.categories.firstWhere(
-        (cat) => cat.id == product.categoryId,
-        orElse: () => Category(id: 0, name: '', color: ''), // fallback آمن
-      );
-      final categoryMatch = category.name.toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
-
-      // إرجاع المنتج إذا تطابق أي من الشروط
-      return nameMatch || barcodeMatch || categoryMatch;
-    }).toList();
+  bool get _hasFilters {
+    return widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null;
   }
 
   @override
   Widget build(BuildContext context) {
-    // --- === 2. تعديل الواجهة لإضافة العنوان والبحث === ---
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          // ignore: deprecated_member_use
           BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- العنوان الجديد ---
+          // العنوان وعدد المنتجات
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              "المنتجات المتاحة (${_filteredProducts.length})",
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1A2B4D),
-              ),
+            child: Row(
+              children: [
+                Text(
+                  "المنتجات المتاحة (${widget.products.length})",
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1A2B4D),
+                  ),
+                ),
+                const Spacer(),
+                if (_hasFilters) ...[
+                  Chip(
+                    label: const Text('فلترة مفعلة'),
+                    backgroundColor: Colors.orange[100],
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: widget.onClearFilters,
+                    child: const Text('مسح الفلترة'),
+                  ),
+                ],
+              ],
             ),
           ),
-          // --- مربع البحث الجديد ---
+
+          // مربع البحث
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: TextField(
-              onChanged: (value) => setState(() => _searchTerm = value),
+              controller: _searchController,
+              onChanged: widget.onSearch,
               decoration: InputDecoration(
                 hintText: "ابحث بالاسم, الباركود, أو الفئة...",
                 prefixIcon: const Icon(Icons.search),
+                suffixIcon:
+                    _searchController.text.isNotEmpty
+                        ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            widget.onSearch?.call("");
+                          },
+                        )
+                        : null,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide.none,
@@ -97,62 +146,213 @@ class _ProductsGridState extends State<ProductsGrid> {
               ),
             ),
           ),
-          // --- شبكة المنتجات (تبقى كما هي) ---
+
+          // فلترة الفئات
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  // زر عرض الكل
+                  InkWell(
+                    onTap: () => widget.onCategorySelected?.call(null),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            widget.selectedCategoryId == null
+                                ? Colors.blue[100]
+                                : Colors.grey[200],
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        'الكل',
+                        style: TextStyle(
+                          color:
+                              widget.selectedCategoryId == null
+                                  ? Colors.blue[800]
+                                  : Colors.grey[600],
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // قائمة الفئات
+                  ...widget.categories.map((category) {
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: InkWell(
+                        onTap:
+                            () => widget.onCategorySelected?.call(category.id),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color:
+                                widget.selectedCategoryId == category.id
+                                    ? _hexToColor(category.color)
+                                    : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            category.name,
+                            style: TextStyle(
+                              color:
+                                  widget.selectedCategoryId == category.id
+                                      ? Colors.white
+                                      : Colors.grey[600],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ),
+
+          // شبكة المنتجات مع Lazy Loading
           Expanded(
             child:
-                _filteredProducts.isEmpty
+                widget.products.isEmpty
                     ? _buildEmptyState()
-                    : GridView.builder(
-                      padding: const EdgeInsets.all(16),
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 200,
-                            childAspectRatio: 0.9,
-                            crossAxisSpacing: 16,
-                            mainAxisSpacing: 16,
-                          ),
-                      itemCount: _filteredProducts.length,
-                      itemBuilder: (context, index) {
-                        final product = _filteredProducts[index];
-                        return ProductSaleCard(
-                          product: product,
-                          category: widget.categories.firstWhere(
-                            (cat) => cat.id == product.categoryId,
-                            orElse:
-                                () => Category(
-                                  id: 0,
-                                  name: 'غير مصنف',
-                                  color: '#808080',
-                                ),
-                          ),
-                          onTap: () => widget.onProductAdded(product),
-                        );
+                    : NotificationListener<ScrollNotification>(
+                      onNotification: (scrollNotification) {
+                        if (scrollNotification is ScrollEndNotification) {
+                          if (_scrollController.position.pixels ==
+                              _scrollController.position.maxScrollExtent) {
+                            widget.onLoadMore?.call();
+                          }
+                        }
+                        return false;
                       },
+                      child: GridView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        gridDelegate:
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: 200,
+                              childAspectRatio: 0.9,
+                              crossAxisSpacing: 16,
+                              mainAxisSpacing: 16,
+                            ),
+                        itemCount:
+                            widget.products.length + (widget.hasMore ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          // مؤشر تحميل المزيد
+                          if (index == widget.products.length &&
+                              widget.hasMore) {
+                            return _buildLoadMoreIndicator();
+                          }
+
+                          final product = widget.products[index];
+                          return ProductSaleCard(
+                            product: product,
+                            category: widget.categories.firstWhere(
+                              (cat) => cat.id == product.categoryId,
+                              orElse:
+                                  () => Category(
+                                    id: 0,
+                                    name: 'غير مصنف',
+                                    color: '#808080',
+                                  ),
+                            ),
+                            onTap: () => widget.onProductAdded(product),
+                          );
+                        },
+                      ),
                     ),
           ),
+
+          // مؤشر تحميل إضافي
+          if (widget.isLoadingMore)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildEmptyState() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off, size: 48, color: Colors.grey),
-          SizedBox(height: 16),
-          Text(
-            "لا توجد منتجات مطابقة للبحث",
-            style: TextStyle(fontSize: 16, color: Colors.grey),
+          Icon(
+            widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null
+                ? Icons.search_off
+                : Icons.inventory_2_outlined,
+            size: 48,
+            color: Colors.grey,
           ),
+          const SizedBox(height: 16),
+          Text(
+            widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null
+                ? "لا توجد منتجات مطابقة للبحث"
+                : "لا توجد منتجات متاحة",
+            style: const TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+          if (widget.searchTerm.isNotEmpty ||
+              widget.selectedCategoryId != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: widget.onClearFilters,
+              child: const Text('مسح الفلترة'),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  Widget _buildLoadMoreIndicator() {
+    return GestureDetector(
+      onTap: widget.onLoadMore,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.keyboard_arrow_down, size: 32, color: Colors.grey),
+            SizedBox(height: 8),
+            Text(
+              'تحميل المزيد',
+              style: TextStyle(
+                color: Colors.grey,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _hexToColor(String hex) {
+    hex = hex.replaceAll("#", "");
+    if (hex.length == 6) hex = "FF$hex";
+    return Color(int.parse(hex, radix: 16));
+  }
 }
 
-// --- بطاقة المنتج (ProductSaleCard) تبقى كما هي بدون أي تغيير ---
+// ProductSaleCard يبقى كما هو بدون تغيير
 class ProductSaleCard extends StatefulWidget {
   final Product product;
   final Category category;
@@ -204,14 +404,12 @@ class _ProductSaleCardState extends State<ProductSaleCard> {
                     _isHovering
                         ? [
                           BoxShadow(
-                            // ignore: deprecated_member_use
                             color: Colors.blue.withOpacity(0.1),
                             blurRadius: 10,
                           ),
                         ]
                         : [
                           BoxShadow(
-                            // ignore: deprecated_member_use
                             color: Colors.black.withOpacity(0.05),
                             blurRadius: 5,
                           ),
@@ -273,7 +471,6 @@ class _ProductSaleCardState extends State<ProductSaleCard> {
                   borderRadius: BorderRadius.circular(6),
                   boxShadow: [
                     BoxShadow(
-                      // ignore: deprecated_member_use
                       color: categoryColor.withOpacity(0.3),
                       blurRadius: 5,
                       offset: const Offset(0, 2),

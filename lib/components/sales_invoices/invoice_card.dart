@@ -14,7 +14,7 @@ class InvoiceCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: Colors.blue[200]!),
+        side: BorderSide(color: _getStatusColor(invoice.paymentStatus)),
       ),
       child: InkWell(
         onTap: onTap,
@@ -28,6 +28,7 @@ class InvoiceCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // الصف الأول: رقم الفاتورة ونوع الدفع
                     Row(
                       children: [
                         Container(
@@ -50,16 +51,55 @@ class InvoiceCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          "${invoice.items.length} منتج",
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getTypeColor(invoice.paymentType),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            invoice.paymentType,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getStatusColor(invoice.paymentStatus),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            invoice.paymentStatus,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
+
+                    // الصف الثاني: عدد المنتجات
+                    Text(
+                      "${invoice.items.length} منتج",
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+
+                    // الصف الثالث: التاريخ والكاشير
                     Row(
                       children: [
                         const Icon(
@@ -87,6 +127,29 @@ class InvoiceCard extends StatelessWidget {
                         ),
                       ],
                     ),
+
+                    // الصف الرابع: المبلغ المتبقي (إذا كان هناك دين)
+                    if (invoice.remainingAmount > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.warning,
+                            size: 12,
+                            color: Colors.red,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            "متبقي: ${invoice.remainingAmount.toStringAsFixed(2)} شيكل",
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -99,6 +162,18 @@ class InvoiceCard extends StatelessWidget {
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "مدفوع: ${invoice.paidAmount.toStringAsFixed(2)}",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color:
+                          invoice.paidAmount == invoice.total
+                              ? Colors.green
+                              : Colors.orange,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -120,5 +195,31 @@ class InvoiceCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  // دالة للحصول على لون حالة السداد
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'مدفوع':
+        return Colors.green;
+      case 'جزئي':
+        return Colors.orange;
+      case 'غير مدفوع':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // دالة للحصول على لون نوع الدفع
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case 'نقدي':
+        return Colors.green;
+      case 'آجل':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
   }
 }

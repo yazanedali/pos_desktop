@@ -1,73 +1,99 @@
 // models/sales_invoice.dart
+
 class SaleInvoice {
-  final int id;
+  final int? id;
   final String invoiceNumber;
   final String date;
   final String time;
   final double total;
+  final double paidAmount;
+  final double remainingAmount;
   final String cashier;
+  final int? customerId;
   final String? customerName;
   final String paymentMethod;
+  final String paymentType;
+  final String paymentStatus;
+  final double originalTotal;
+  final String? notes;
   final String? createdAt;
-  final List<SaleInvoiceItem> items;
+  final List<SaleInvoiceItem> items; // <-- هون بتكون العناصر
 
   SaleInvoice({
-    required this.id,
+    this.id,
     required this.invoiceNumber,
     required this.date,
     required this.time,
     required this.total,
+    required this.paidAmount,
+    required this.remainingAmount,
     required this.cashier,
+    this.customerId,
     this.customerName,
-    this.paymentMethod = 'نقدي',
+    required this.paymentMethod,
+    required this.paymentType,
+    required this.paymentStatus,
+    required this.originalTotal,
+    this.notes,
     this.createdAt,
-    required this.items,
+    required this.items, // <-- مطلوبة
   });
 
-  // تحويل من Map إلى SaleInvoice
   factory SaleInvoice.fromMap(Map<String, dynamic> map) {
     return SaleInvoice(
       id: map['id'],
-      invoiceNumber: map['invoice_number'],
-      date: map['date'],
-      time: map['time'],
-      total:
-          map['total'] is int ? (map['total'] as int).toDouble() : map['total'],
-      cashier: map['cashier'],
+      invoiceNumber: map['invoice_number'] ?? '',
+      date: map['date'] ?? '',
+      time: map['time'] ?? '',
+      total: (map['total'] as num?)?.toDouble() ?? 0.0,
+      paidAmount: (map['paid_amount'] as num?)?.toDouble() ?? 0.0,
+      remainingAmount: (map['remaining_amount'] as num?)?.toDouble() ?? 0.0,
+      cashier: map['cashier'] ?? '',
+      customerId: map['customer_id'],
       customerName: map['customer_name'],
       paymentMethod: map['payment_method'] ?? 'نقدي',
+      paymentType: map['payment_type'] ?? 'نقدي',
+      paymentStatus: map['payment_status'] ?? 'مدفوع',
+      originalTotal: (map['original_total'] as num?)?.toDouble() ?? 0.0,
+      notes: map['notes'],
       createdAt: map['created_at'],
-      items: [], // سيتم تعبئتها لاحقاً
+      items: [], // <-- بتكون فارغة وبتملأ بعدين
     );
   }
 
-  // تحويل من SaleInvoice إلى Map
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
+      if (id != null) 'id': id,
       'invoice_number': invoiceNumber,
       'date': date,
       'time': time,
       'total': total,
+      'paid_amount': paidAmount,
+      'remaining_amount': remainingAmount,
       'cashier': cashier,
+      'customer_id': customerId,
       'customer_name': customerName,
       'payment_method': paymentMethod,
+      'payment_type': paymentType,
+      'payment_status': paymentStatus,
+      'original_total': originalTotal,
+      'notes': notes,
       'created_at': createdAt,
     };
   }
 }
 
 class SaleInvoiceItem {
-  final int id;
+  final int? id;
   final int invoiceId;
-  final int productId;
+  final int? productId;
   final String productName;
   final double price;
-  final double quantity;
+  final double quantity; // <-- غيرت لـ double عشان يتوافق مع DB
   final double total;
 
   SaleInvoiceItem({
-    required this.id,
+    this.id,
     required this.invoiceId,
     required this.productId,
     required this.productName,
@@ -76,23 +102,21 @@ class SaleInvoiceItem {
     required this.total,
   });
 
-  // تحويل من Map إلى SaleInvoiceItem
   factory SaleInvoiceItem.fromMap(Map<String, dynamic> map) {
     return SaleInvoiceItem(
       id: map['id'],
-      invoiceId: map['invoice_id'],
-      productId: map['product_id'],
-      productName: map['product_name'],
-      price: (map['price'] as num).toDouble(),
-      quantity: (map['quantity'] as num).toDouble(),
-      total: (map['total'] as num).toDouble(),
+      invoiceId: map['invoice_id'] ?? 0,
+      productId: map['product_id'] ?? 0,
+      productName: map['product_name'] ?? '',
+      price: (map['price'] as num?)?.toDouble() ?? 0.0,
+      quantity: (map['quantity'] as num?)?.toDouble() ?? 0.0, // <-- double
+      total: (map['total'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
-  // تحويل من SaleInvoiceItem إلى Map
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
+      if (id != null) 'id': id,
       'invoice_id': invoiceId,
       'product_id': productId,
       'product_name': productName,

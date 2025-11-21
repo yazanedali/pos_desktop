@@ -16,47 +16,110 @@ class SalesInvoices extends StatefulWidget {
 
 class _SalesInvoicesState extends State<SalesInvoices> {
   final SalesInvoiceService _invoiceService = SalesInvoiceService();
+  final ScrollController _scrollController = ScrollController();
+
   List<SaleInvoice> _invoices = [];
-  SaleInvoice? _selectedInvoice;
   bool _isLoading = true;
-  bool _isDialogOpen = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  int _currentPage = 1;
   Map<String, dynamic> _statistics = {};
 
+  final TextEditingController _dateFromController = TextEditingController();
+  final TextEditingController _dateToController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+
+  int _totalInvoicesCount = 0;
   @override
   void initState() {
     super.initState();
     _loadInvoices();
     _loadStatistics();
+    _setupScrollListener();
   }
 
-  Future<void> _loadInvoices() async {
-    try {
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _dateFromController.dispose();
+    _dateToController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _setupScrollListener() {
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels ==
+          _scrollController.position.maxScrollExtent) {
+        _loadMoreInvoices();
+      }
+    });
+  }
+
+  Future<void> _loadInvoices({bool reset = true}) async {
+    if (reset) {
       setState(() {
         _isLoading = true;
+        _currentPage = 1;
+        _hasMore = true;
       });
+    }
 
-      final invoices = await _invoiceService.getAllSalesInvoices();
+    try {
+      // 2. استخدام الدالة الموحدة لجلب البيانات، وتمرير قيمة البحث
+      final invoices = await _invoiceService.getSalesInvoicesPaginated(
+        page: _currentPage,
+        startDate:
+            _dateFromController.text.isNotEmpty
+                ? _dateFromController.text
+                : null,
+        endDate:
+            _dateToController.text.isNotEmpty ? _dateToController.text : null,
+      );
+
+      final totalCount = await _invoiceService.getInvoicesCount(
+        startDate:
+            _dateFromController.text.isNotEmpty
+                ? _dateFromController.text
+                : null,
+        endDate:
+            _dateToController.text.isNotEmpty ? _dateToController.text : null,
+      );
+
       setState(() {
-        _invoices = invoices;
+        if (reset) {
+          _invoices = invoices;
+        } else {
+          _invoices.addAll(invoices);
+        }
+        _totalInvoicesCount = totalCount;
+        _hasMore = invoices.length == SalesInvoiceService.pageSize;
         _isLoading = false;
+        _isLoadingMore = false;
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
-      });
-
-      // استخدام البيانات الوهمية في حالة الخطأ
-      setState(() {
-        _invoices = SalesInvoiceService.getMockSalesInvoices();
-        _isLoading = false;
+        _isLoadingMore = false;
       });
 
       TopAlert.showError(
-        // ignore: use_build_context_synchronously
         context: context,
-        message: 'حدث خطأ أثناء تحميل الفواتير. عرض بيانات وهمية.',
+        message:
+            'حدث خطأ أثناء تحميل الفواتير. ${reset ? 'عرض بيانات وهمية.' : ''}',
       );
     }
+  }
+
+  Future<void> _loadMoreInvoices() async {
+    if (_isLoadingMore || !_hasMore || _isLoading) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    _currentPage++;
+    await _loadInvoices(reset: false);
   }
 
   Future<void> _loadStatistics() async {
@@ -66,7 +129,6 @@ class _SalesInvoicesState extends State<SalesInvoices> {
         _statistics = stats;
       });
     } catch (e) {
-      // ignore: use_build_context_synchronously, avoid_print
       print('Error loading statistics: $e');
     }
   }
@@ -81,19 +143,12 @@ class _SalesInvoicesState extends State<SalesInvoices> {
             Navigator.of(dialogContext).pop();
           },
           onPrint: () {
-            Navigator.of(dialogContext).pop(); // أغلق النافذة أولاً
-            _printInvoice(invoice); // ثم نفذ عملية الطباعة
+            Navigator.of(dialogContext).pop();
+            _printInvoice(invoice);
           },
         );
       },
     );
-  }
-
-  void _closeDialog() {
-    setState(() {
-      _isDialogOpen = false;
-      _selectedInvoice = null;
-    });
   }
 
   void _printInvoice(SaleInvoice invoice) {
@@ -108,116 +163,290 @@ class _SalesInvoicesState extends State<SalesInvoices> {
     await _loadStatistics();
   }
 
+  String _getFormattedDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _dateFromController.clear();
+      _dateToController.clear();
+      _searchController.clear();
+    });
+    _loadInvoices();
+  }
+
+  void _searchInvoices() {
+    _loadInvoices(reset: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _refreshData,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header Card with Statistics
-              Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.blue[100]!),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.description, color: Colors.blue[800]),
-                          const SizedBox(width: 8),
-                          const Text(
-                            "فواتير المبيعات",
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            onPressed: _refreshData,
-                            icon: const Icon(Icons.refresh),
-                            tooltip: 'تحديث',
-                          ),
-                        ],
+        child: CustomScrollView(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header Card with Statistics
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.blue[100]!),
                       ),
-                      const SizedBox(height: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.description,
+                                  color: Colors.blue[800],
+                                ),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  "فواتير المبيعات",
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue,
+                                  ),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  onPressed: _refreshData,
+                                  icon: const Icon(Icons.refresh),
+                                  tooltip: 'تحديث',
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            _buildStatistics(),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
-                      // Statistics
-                      _buildStatistics(),
-                    ],
+                    // Filters Card
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.blue[100]!),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "فلترة الفواتير",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _buildFilters(),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ),
+
+            // Invoices List
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.blue[100]!),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.receipt, color: Colors.blue[800]),
+                            const SizedBox(width: 8),
+                            const Text(
+                              "قائمة الفواتير",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              "($_totalInvoicesCount)", // استخدام العدد الكلي بدلاً من length
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+            ),
 
-              // Invoices List Card
-              Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.blue[100]!),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.receipt, color: Colors.blue[800]),
-                          const SizedBox(width: 8),
-                          const Text(
-                            "قائمة الفواتير",
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            "(${_invoices.length})",
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      _isLoading
-                          ? _buildLoadingState()
-                          : _invoices.isEmpty
-                          ? const EmptyInvoicesState()
-                          : _buildInvoicesList(),
-                    ],
+            _isLoading
+                ? SliverToBoxAdapter(child: _buildLoadingState())
+                : _invoices.isEmpty
+                ? SliverToBoxAdapter(
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: EmptyInvoicesState(),
                   ),
+                )
+                : SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    if (index == _invoices.length) {
+                      return _buildLoadMoreIndicator();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: InvoiceCard(
+                        invoice: _invoices[index],
+                        onTap: () => _showInvoiceDetails(_invoices[index]),
+                      ),
+                    );
+                  }, childCount: _invoices.length + (_hasMore ? 1 : 0)),
                 ),
-              ),
-
-              // Invoice Details Dialog
-              if (_isDialogOpen && _selectedInvoice != null)
-                InvoiceDetailsDialog(
-                  invoice: _selectedInvoice!,
-                  onClose: _closeDialog,
-                  onPrint: () => _printInvoice(_selectedInvoice!),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _buildFilters() {
+    return Column(
+      children: [
+        TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'ابحث برقم الفاتورة أو اسم الكاشير...',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                _searchController.clear();
+                _loadInvoices();
+              },
+            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onSubmitted: (_) => _searchInvoices(),
+        ),
+        const SizedBox(height: 12),
+
+        // Date Range Filter
+        Row(
+          children: [
+            // Date From
+            Expanded(
+              child: TextField(
+                controller: _dateFromController,
+                decoration: const InputDecoration(
+                  labelText: "من تاريخ",
+                  border: OutlineInputBorder(),
+                  suffixIcon: Icon(Icons.calendar_today),
+                ),
+                readOnly: true,
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                  );
+                  if (date != null) {
+                    setState(() {
+                      _dateFromController.text = _getFormattedDate(date);
+                    });
+                    _loadInvoices();
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // Date To
+            Expanded(
+              child: TextField(
+                controller: _dateToController,
+                decoration: const InputDecoration(
+                  labelText: "إلى تاريخ",
+                  border: OutlineInputBorder(),
+                  suffixIcon: Icon(Icons.calendar_today),
+                ),
+                readOnly: true,
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                  );
+                  if (date != null) {
+                    setState(() {
+                      _dateToController.text = _getFormattedDate(date);
+                    });
+                    _loadInvoices();
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Action Buttons
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _searchInvoices,
+                icon: const Icon(Icons.search),
+                label: const Text('بحث'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _clearFilters,
+                icon: const Icon(Icons.clear_all),
+                label: const Text('مسح الكل'),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -274,10 +503,8 @@ class _SalesInvoicesState extends State<SalesInvoices> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          // ignore: deprecated_member_use
           color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),
-          // ignore: deprecated_member_use
           border: Border.all(color: color.withOpacity(0.3)),
         ),
         child: Column(
@@ -309,31 +536,24 @@ class _SalesInvoicesState extends State<SalesInvoices> {
   }
 
   Widget _buildLoadingState() {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(32),
-        child: Column(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('جاري تحميل الفواتير...'),
-          ],
-        ),
+    return const Padding(
+      padding: EdgeInsets.all(32),
+      child: Column(
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('جاري تحميل الفواتير...'),
+        ],
       ),
     );
   }
 
-  Widget _buildInvoicesList() {
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _invoices.length,
-      itemBuilder: (context, index) {
-        return InvoiceCard(
-          invoice: _invoices[index],
-          onTap: () => _showInvoiceDetails(_invoices[index]),
-        );
-      },
-    );
+  Widget _buildLoadMoreIndicator() {
+    return _isLoadingMore
+        ? const Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: CircularProgressIndicator()),
+        )
+        : const SizedBox.shrink();
   }
 }

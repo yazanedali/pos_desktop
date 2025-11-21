@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart'; // --- === استيراد الحزمة الجديدة === ---
+import 'package:uuid/uuid.dart';
 import '../database/product_queries.dart';
 import '../models/category.dart';
 import '../models/purchase_invoice.dart';
@@ -11,7 +11,6 @@ class PurchaseInvoiceDialog extends StatefulWidget {
   final Function() onCancel;
   final PurchaseInvoice? invoiceToEdit;
 
-  // ignore: use_super_parameters
   const PurchaseInvoiceDialog({
     Key? key,
     required this.categories,
@@ -51,8 +50,6 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       _dateController.text = invoice.date;
       _invoiceItems = List<PurchaseInvoiceItem>.from(invoice.items);
     } else {
-      // --- === التعديل: توليد رقم جديد عند فتح النافذة === ---
-      // نستخدم أول 8 خانات من UUID مع كلمة INV-
       _generatedInvoiceNumber =
           'INV-${const Uuid().v4().substring(0, 8).toUpperCase()}';
       _dateController.text = _getTodayDate();
@@ -61,7 +58,6 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     _initializeControllers();
   }
 
-  // --- دوال إدارة الحالة والبيانات تبقى كما هي ---
   void _initializeControllers() {
     _disposeItemControllers();
     for (final item in _invoiceItems) {
@@ -90,21 +86,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   }
 
   void _disposeItemControllers() {
-    for (var c in _productNameControllers) {
-      c.dispose();
-    }
-    for (var c in _barcodeControllers) {
-      c.dispose();
-    }
-    for (var c in _quantityControllers) {
-      c.dispose();
-    }
-    for (var c in _purchasePriceControllers) {
-      c.dispose();
-    }
-    for (var c in _salePriceControllers) {
-      c.dispose();
-    }
+    // ignore: curly_braces_in_flow_control_structures
+    for (var c in _productNameControllers) c.dispose();
+    // ignore: curly_braces_in_flow_control_structures
+    for (var c in _barcodeControllers) c.dispose();
+    // ignore: curly_braces_in_flow_control_structures
+    for (var c in _quantityControllers) c.dispose();
+    // ignore: curly_braces_in_flow_control_structures
+    for (var c in _purchasePriceControllers) c.dispose();
+    // ignore: curly_braces_in_flow_control_structures
+    for (var c in _salePriceControllers) c.dispose();
     _productNameControllers.clear();
     _barcodeControllers.clear();
     _quantityControllers.clear();
@@ -128,16 +119,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         PurchaseInvoiceItem(
           productName: '',
           barcode: '',
-          quantity: 0,
-          purchasePrice: 0,
-          salePrice: 0,
+          quantity: 0.0, // تأكد أنه double
+          purchasePrice: 0.0,
+          salePrice: 0.0,
           category: '',
-          total: 0,
+          total: 0.0,
         ),
       );
       _productNameControllers.add(TextEditingController());
       _barcodeControllers.add(TextEditingController());
-      _quantityControllers.add(TextEditingController(text: '0'));
+      _quantityControllers.add(TextEditingController(text: '1'));
       _purchasePriceControllers.add(TextEditingController(text: '0'));
       _salePriceControllers.add(TextEditingController(text: '0'));
     });
@@ -196,11 +187,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         );
         _productNameControllers[index].text = product.name;
         _salePriceControllers[index].text = product.price.toString();
-        // يمكنك تحديث حقل الفئة هنا إذا كان لديك controller له
       });
     } else {
       TopAlert.showWarning(
-        // ignore: use_build_context_synchronously
         context: context,
         message: 'لم يتم العثور على منتج بهذا الباركود',
       );
@@ -211,33 +200,43 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       _invoiceItems.fold(0, (total, item) => total + item.total);
 
   void _submitForm() {
-    if (_formKey.currentState!.validate()) {
-      final validItems =
-          _invoiceItems
-              .where((item) => item.productName.isNotEmpty && item.quantity > 0)
-              .toList();
-      if (validItems.isEmpty) {
-        TopAlert.showError(
-          context: context,
-          message: 'يرجى إضافة منتج واحد على الأقل',
-        );
-        return;
-      }
-      final invoice = PurchaseInvoice(
-        id: widget.invoiceToEdit?.id,
-        // --- === التعديل: استخدام الرقم الذي تم توليده === ---
-        invoiceNumber: _generatedInvoiceNumber,
-        supplier: _supplierController.text,
-        date: _dateController.text,
-        time: _isEditMode ? widget.invoiceToEdit!.time : _getCurrentTime(),
-        items: validItems,
-        total: _calculateTotal(),
-      );
-      widget.onSave(invoice);
+    if (_supplierController.text.isEmpty) {
+      TopAlert.showError(context: context, message: 'يرجى إدخال اسم المورد');
+      return;
     }
+
+    final validItems =
+        _invoiceItems.where((item) {
+          final hasName = item.productName.trim().isNotEmpty;
+          final hasQuantity = item.quantity > 0;
+          final hasPrice = item.purchasePrice > 0;
+
+          return hasName && hasQuantity && hasPrice;
+        }).toList();
+
+    if (validItems.isEmpty) {
+      TopAlert.showError(
+        context: context,
+        message:
+            'يرجى إضافة منتج واحد على الأقل مع:\n- اسم المنتج\n- كمية أكبر من صفر\n- سعر شراء أكبر من صفر',
+      );
+      return;
+    }
+
+    // إذا كانت جميع الشروط متوفرة، إنشاء الفاتورة
+    final invoice = PurchaseInvoice(
+      id: widget.invoiceToEdit?.id,
+      invoiceNumber: _generatedInvoiceNumber,
+      supplier: _supplierController.text,
+      date: _dateController.text,
+      time: _isEditMode ? widget.invoiceToEdit!.time : _getCurrentTime(),
+      items: validItems,
+      total: _calculateTotal(),
+    );
+
+    widget.onSave(invoice);
   }
 
-  // --- === بداية التغييرات التصميمية في دالة build === ---
   @override
   Widget build(BuildContext context) {
     final dialogWidth = MediaQuery.of(context).size.width * 0.8;
@@ -255,10 +254,9 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- === تعديل: استبدال حقل الإدخال بنص ثابت === ---
+              // معلومات الفاتورة الأساسية
               Row(
                 children: [
-                  // --- عرض رقم الفاتورة كنص ---
                   Expanded(
                     child: InputDecorator(
                       decoration: const InputDecoration(
@@ -319,7 +317,8 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 ],
               ),
               const SizedBox(height: 20),
-              // --- Invoice Items Header ---
+
+              // بنود الفاتورة
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -339,14 +338,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 ],
               ),
               const Divider(height: 24),
-              // --- Invoice Items List ---
+
+              // قائمة البنود
               Expanded(
                 child: ListView.builder(
                   itemCount: _invoiceItems.length,
                   itemBuilder: (context, index) => _buildInvoiceItemCard(index),
                 ),
               ),
-              // --- Total Display ---
+
+              // الإجمالي
               Padding(
                 padding: const EdgeInsets.only(top: 16.0),
                 child: Row(
@@ -389,7 +390,6 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     );
   }
 
-  // --- === تصميم محسن لكرت المنتج داخل الفاتورة === ---
   Widget _buildInvoiceItemCard(int index) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -407,7 +407,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 child: TextFormField(
                   controller: _productNameControllers[index],
                   decoration: const InputDecoration(
-                    labelText: "اسم المنتج",
+                    labelText: "اسم المنتج *",
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (v) => _updateInvoiceItem(index, 'productName', v),
@@ -460,7 +460,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 child: TextFormField(
                   controller: _quantityControllers[index],
                   decoration: const InputDecoration(
-                    labelText: "الكمية",
+                    labelText: "الكمية *",
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.number,
@@ -468,7 +468,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       (v) => _updateInvoiceItem(
                         index,
                         'quantity',
-                        int.tryParse(v) ?? 0,
+                        double.tryParse(v) ?? 0.0,
                       ),
                 ),
               ),
@@ -477,7 +477,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 child: TextFormField(
                   controller: _purchasePriceControllers[index],
                   decoration: const InputDecoration(
-                    labelText: "سعر الشراء",
+                    labelText: "سعر الشراء *",
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.number,
@@ -485,7 +485,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       (v) => _updateInvoiceItem(
                         index,
                         'purchasePrice',
-                        double.tryParse(v) ?? 0,
+                        double.tryParse(v) ?? 0.0,
                       ),
                 ),
               ),
@@ -502,7 +502,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       (v) => _updateInvoiceItem(
                         index,
                         'salePrice',
-                        double.tryParse(v) ?? 0,
+                        double.tryParse(v) ?? 0.0,
                       ),
                 ),
               ),

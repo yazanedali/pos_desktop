@@ -28,7 +28,9 @@ class DatabaseHelper {
 
     String path = join(documentsDirectory.path, 'pos_database.db');
 
-    return await openDatabase(path, version: 1, onCreate: _createDatabase);
+    final db = await openDatabase(path, version: 2, onCreate: _createDatabase);
+
+    return db;
   }
 
   Future<void> _createDatabase(Database db, int version) async {
@@ -48,13 +50,24 @@ class DatabaseHelper {
       )
     ''');
 
+    // جدول العملاء (يجب إنشاؤه قبل sales_invoices)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        address TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
     // جدول المنتجات
     await db.execute('''
       CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         price REAL NOT NULL,
-        stock REAL DEFAULT 0,  -- <--- تم حذف كلمة REAL المكررة
+        stock REAL DEFAULT 0,
         barcode TEXT UNIQUE,
         category_id INTEGER,
         is_active INTEGER DEFAULT 1,
@@ -64,7 +77,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // جدول فواتير المبيعات
+    // جدول فواتير المبيعات (بعد إنشاء customers)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sales_invoices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +89,12 @@ class DatabaseHelper {
         remaining_amount REAL NOT NULL,
         cashier TEXT NOT NULL,
         customer_id INTEGER,
+        customer_name TEXT,
         payment_method TEXT DEFAULT 'نقدي',
+        payment_status TEXT DEFAULT 'مدفوع',
+        payment_type TEXT DEFAULT 'نقدي',
+        original_total REAL NOT NULL DEFAULT 0,
+        notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (customer_id) REFERENCES customers (id)
       )
@@ -87,10 +105,10 @@ class DatabaseHelper {
       CREATE TABLE IF NOT EXISTS sales_invoice_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         invoice_id INTEGER NOT NULL,
-        product_id INTEGER NOT NULL,
+        product_id INTEGER,
         product_name TEXT NOT NULL,
         price REAL NOT NULL,
-        quantity REAL NOT NULL, -- <--- تأكد أن هذا أيضاً REAL
+        quantity REAL NOT NULL,
         total REAL NOT NULL,
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
@@ -117,7 +135,7 @@ class DatabaseHelper {
         product_name TEXT NOT NULL,
         barcode TEXT,
         category TEXT,
-        quantity REAL NOT NULL, -- <--- تأكد أن هذا أيضاً REAL
+        quantity REAL NOT NULL,
         purchase_price REAL NOT NULL,
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
@@ -125,16 +143,7 @@ class DatabaseHelper {
       )
     ''');
 
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS customers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT,
-        address TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    ''');
-
+    // جدول حزم المنتجات
     await db.execute('''
       CREATE TABLE IF NOT EXISTS product_packages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +153,21 @@ class DatabaseHelper {
         price REAL NOT NULL,
         barcode TEXT,
         FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // جدول سجلات السداد
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS payment_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL,
+        payment_date TEXT NOT NULL,
+        payment_time TEXT NOT NULL,
+        amount REAL NOT NULL,
+        payment_method TEXT DEFAULT 'نقدي',
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
     ''');
   }
@@ -184,6 +208,13 @@ class DatabaseHelper {
         'barcode': '67890',
         'category_id': categoryMap['وجبات خفيفة'],
       });
+
+      // إضافة عملاء افتراضيين
+      await db.insert('customers', {
+        'name': 'عميل نقدي',
+        'phone': '0000000000',
+      });
+      await db.insert('customers', {'name': 'عميل آجل', 'phone': '1111111111'});
     }
   }
 

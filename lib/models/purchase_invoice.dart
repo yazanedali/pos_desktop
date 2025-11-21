@@ -33,15 +33,14 @@ class PurchaseInvoice {
 
   factory PurchaseInvoice.fromMap(Map<String, dynamic> map) {
     return PurchaseInvoice(
-      id: map['id'],
-      invoiceNumber: map['invoice_number'],
-      supplier: map['supplier'],
-      date: map['date'],
-      time: map['time'],
+      id: map['id'] as int?,
+      invoiceNumber: map['invoice_number'] as String,
+      supplier: map['supplier'] as String,
+      date: map['date'] as String,
+      time: map['time'] as String,
       items: [],
-      total:
-          map['total'] is int ? (map['total'] as int).toDouble() : map['total'],
-      createdAt: map['created_at'],
+      total: (map['total'] as num).toDouble(), // <-- التحويل الآمن
+      createdAt: map['created_at'] as String?,
     );
   }
 
@@ -72,7 +71,7 @@ class PurchaseInvoiceItem {
   final int? id;
   final String productName;
   final String barcode;
-  final int quantity;
+  final double quantity; // <-- غير من int إلى double
   final double purchasePrice;
   final double salePrice;
   final String category;
@@ -82,7 +81,7 @@ class PurchaseInvoiceItem {
     this.id,
     required this.productName,
     required this.barcode,
-    required this.quantity,
+    required this.quantity, // <-- غير من int إلى double
     required this.purchasePrice,
     required this.salePrice,
     required this.category,
@@ -94,7 +93,7 @@ class PurchaseInvoiceItem {
       'id': id,
       'product_name': productName,
       'barcode': barcode,
-      'quantity': quantity,
+      'quantity': quantity, // <-- الآن يتوافق مع قاعدة البيانات
       'purchase_price': purchasePrice,
       'sale_price': salePrice,
       'category': category,
@@ -104,21 +103,14 @@ class PurchaseInvoiceItem {
 
   factory PurchaseInvoiceItem.fromMap(Map<String, dynamic> map) {
     return PurchaseInvoiceItem(
-      id: map['id'],
-      productName: map['product_name'],
-      barcode: map['barcode'],
-      quantity: map['quantity'],
-      purchasePrice:
-          map['purchase_price'] is int
-              ? (map['purchase_price'] as int).toDouble()
-              : map['purchase_price'],
-      salePrice:
-          map['sale_price'] is int
-              ? (map['sale_price'] as int).toDouble()
-              : map['sale_price'],
-      category: map['category'],
-      total:
-          map['total'] is int ? (map['total'] as int).toDouble() : map['total'],
+      id: map['id'] as int?,
+      productName: map['product_name'] as String,
+      barcode: map['barcode'] as String,
+      quantity: (map['quantity'] as num).toDouble(), // <-- التحويل الآمن
+      purchasePrice: (map['purchase_price'] as num).toDouble(),
+      salePrice: (map['sale_price'] as num).toDouble(),
+      category: map['category'] as String,
+      total: (map['total'] as num).toDouble(),
     );
   }
 
@@ -126,7 +118,7 @@ class PurchaseInvoiceItem {
     int? id,
     String? productName,
     String? barcode,
-    int? quantity,
+    double? quantity, // <-- غير من int إلى double
     double? purchasePrice,
     double? salePrice,
     String? category,
@@ -136,7 +128,7 @@ class PurchaseInvoiceItem {
       id: id ?? this.id,
       productName: productName ?? this.productName,
       barcode: barcode ?? this.barcode,
-      quantity: quantity ?? this.quantity,
+      quantity: quantity ?? this.quantity, // <-- غير من int إلى double
       purchasePrice: purchasePrice ?? this.purchasePrice,
       salePrice: salePrice ?? this.salePrice,
       category: category ?? this.category,

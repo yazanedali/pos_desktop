@@ -15,58 +15,156 @@ class PurchaseInvoices extends StatefulWidget {
 }
 
 class _PurchaseInvoicesState extends State<PurchaseInvoices> {
-  late Future<List<PurchaseInvoice>> _invoicesFuture;
+  final PurchaseQueries _purchaseQueries = PurchaseQueries();
+  final CategoryQueries _categoryQueries = CategoryQueries();
+  final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+
+  List<PurchaseInvoice> _invoices = [];
   List<Category> _categories = [];
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  int _currentPage = 1;
+  int _totalInvoicesCount = 0;
 
   @override
   void initState() {
     super.initState();
     _refreshData();
+    _setupScrollListener();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _setupScrollListener() {
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels ==
+          _scrollController.position.maxScrollExtent) {
+        _loadMoreInvoices();
+      }
+    });
   }
 
   Future<void> _refreshData() async {
     setState(() {
       _isLoading = true;
     });
-    // جلب الفئات والفواتير من قاعدة البيانات في نفس الوقت
-    final categories = await CategoryQueries().getCategories();
-    final invoicesFuture = PurchaseQueries().getPurchaseInvoices();
+
+    try {
+      final results = await Future.wait([
+        _loadInvoices(reset: true),
+        _categoryQueries.getCategories(),
+      ]);
+
+      setState(() {
+        _categories = results[1] as List<Category>;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      TopAlert.showError(
+        context: context,
+        message: 'خطأ في تحميل البيانات: $e',
+      );
+    }
+  }
+
+  Future<void> _loadInvoices({bool reset = true}) async {
+    try {
+      if (reset) {
+        setState(() {
+          _currentPage = 1;
+          _hasMore = true;
+        });
+      }
+
+      final invoices = await _purchaseQueries.getPurchaseInvoicesPaginated(
+        page: _currentPage,
+        searchTerm:
+            _searchController.text.isNotEmpty ? _searchController.text : null,
+      );
+
+      // الحصول على العدد الكلي للفواتير (مع الفلترة)
+      final totalCount = await _purchaseQueries.getPurchaseInvoicesCount(
+        searchTerm:
+            _searchController.text.isNotEmpty ? _searchController.text : null,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        if (reset) {
+          _invoices = invoices;
+        } else {
+          _invoices.addAll(invoices);
+        }
+        _totalInvoicesCount = totalCount;
+        _hasMore = invoices.length == PurchaseQueries.pageSize;
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  Future<void> _loadMoreInvoices() async {
+    if (_isLoadingMore || !_hasMore) return;
 
     setState(() {
-      _categories = categories;
-      _invoicesFuture = invoicesFuture;
-      _isLoading = false;
+      _isLoadingMore = true;
     });
+
+    _currentPage++;
+    await _loadInvoices(reset: false);
+  }
+
+  void _onSearch(String searchTerm) {
+    _loadInvoices(reset: true);
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchController.clear();
+    });
+    _loadInvoices(reset: true);
   }
 
   void _addInvoice(PurchaseInvoice invoice) async {
     try {
-      await PurchaseQueries().insertPurchaseInvoice(invoice);
+      await _purchaseQueries.insertPurchaseInvoice(invoice);
       TopAlert.showSuccess(
-        // ignore: use_build_context_synchronously
         context: context,
         message: "تم إضافة فاتورة الشراء ${invoice.invoiceNumber} بنجاح",
       );
-      _refreshData(); // تحديث القائمة
+      _refreshData();
     } catch (e) {
-      // ignore: use_build_context_synchronously
       TopAlert.showError(context: context, message: "حدث خطأ: ${e.toString()}");
     }
   }
 
   void _updateInvoice(PurchaseInvoice invoice) async {
     try {
-      await PurchaseQueries().updatePurchaseInvoice(invoice);
+      await _purchaseQueries.updatePurchaseInvoice(invoice);
       TopAlert.showSuccess(
-        // ignore: use_build_context_synchronously
         context: context,
         message: "تم تعديل الفاتورة ${invoice.invoiceNumber} بنجاح",
       );
-      _refreshData(); // تحديث القائمة
+      _refreshData();
     } catch (e) {
       TopAlert.showError(
-        // ignore: use_build_context_synchronously
         context: context,
         message: "حدث خطأ أثناء التعديل: ${e.toString()}",
       );
@@ -79,7 +177,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
       builder:
           (context) => PurchaseInvoiceDialog(
             categories: _categories,
-            invoiceToEdit: invoice, // تمرير الفاتورة هنا
+            invoiceToEdit: invoice,
             onSave: (updatedInvoice) {
               _updateInvoice(updatedInvoice);
               Navigator.of(context).pop();
@@ -90,15 +188,12 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   }
 
   void _deleteInvoice(int id) async {
-    // يمكنك إضافة ديالوج تأكيد هنا
     try {
-      await PurchaseQueries().deletePurchaseInvoice(id);
-      // ignore: use_build_context_synchronously
+      await _purchaseQueries.deletePurchaseInvoice(id);
       TopAlert.showSuccess(context: context, message: "تم حذف الفاتورة بنجاح");
-      _refreshData(); // تحديث القائمة
+      _refreshData();
     } catch (e) {
       TopAlert.showError(
-        // ignore: use_build_context_synchronously
         context: context,
         message: "حدث خطأ أثناء الحذف: ${e.toString()}",
       );
@@ -134,69 +229,82 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header Card - سيبقى كما هو تقريباً
-        _buildHeader(),
-        const SizedBox(height: 16),
-
-        // Invoices List Card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.blue[100]!),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: CustomScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildListHeader(),
-                const SizedBox(height: 16),
-                _buildContent(),
-              ],
+              children: [_buildHeader(), const SizedBox(height: 16)],
             ),
           ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildContent() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+          // Filters Card
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildSearchCard(),
+            ),
+          ),
 
-    return FutureBuilder<List<PurchaseInvoice>>(
-      future: _invoicesFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          return Center(child: Text("حدث خطأ: ${snapshot.error}"));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return _buildEmptyState();
-        } else {
-          final invoices = snapshot.data!;
-          return _buildInvoicesList(invoices);
-        }
-      },
+          // Invoices List Header
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: _buildListHeader(),
+            ),
+          ),
+
+          // Invoices List
+          _isLoading
+              ? SliverToBoxAdapter(child: _buildLoadingState())
+              : _invoices.isEmpty
+              ? SliverToBoxAdapter(child: _buildEmptyState())
+              : SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index == _invoices.length) {
+                    return _buildLoadMoreIndicator();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildInvoiceCard(_invoices[index]),
+                  );
+                }, childCount: _invoices.length + (_hasMore ? 1 : 0)),
+              ),
+        ],
+      ),
     );
   }
 
   Widget _buildHeader() {
-    // ... (كود الهيدر الخاص بك يمكن نقله هنا لترتيب الكود)
-    // يمكنك تعديل عدد الفواتير ليعكس العدد الحقيقي من snapshot
     return Card(
-      // ...
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.blue[100]!),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // ... عنوان "فواتير الشراء"
+            Row(
+              children: [
+                Icon(Icons.shopping_cart, color: Colors.blue[800]),
+                const SizedBox(width: 8),
+                const Text(
+                  "فواتير المشتريات",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
+                ),
+              ],
+            ),
             ElevatedButton.icon(
               onPressed: _showAddInvoiceDialog,
               icon: const Icon(Icons.add, size: 18),
@@ -216,19 +324,83 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     );
   }
 
-  Widget _buildListHeader() {
-    // ... كود عنوان القائمة
-    return Row(/* ... */);
+  Widget _buildSearchCard() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.blue[100]!),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              onChanged: _onSearch,
+              decoration: InputDecoration(
+                hintText: "ابحث برقم الفاتورة أو اسم المورد...",
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon:
+                    _searchController.text.isNotEmpty
+                        ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: _clearFilters,
+                        )
+                        : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            if (_searchController.text.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(
+                    'فلترة مفعلة',
+                    style: TextStyle(
+                      color: Colors.orange[700],
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  OutlinedButton(
+                    onPressed: _clearFilters,
+                    child: const Text('مسح الفلترة'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
-  Widget _buildInvoicesList(List<PurchaseInvoice> invoices) {
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: invoices.length,
-      itemBuilder: (context, index) {
-        return _buildInvoiceCard(invoices[index]);
-      },
+  Widget _buildListHeader() {
+    return Row(
+      children: [
+        Icon(Icons.receipt, color: Colors.blue[800]),
+        const SizedBox(width: 8),
+        const Text(
+          "قائمة فواتير الشراء",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.blue,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          "($_totalInvoicesCount)",
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
+          ),
+        ),
+      ],
     );
   }
 
@@ -242,7 +414,6 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
           children: [
             Expanded(
               child: Column(
-                // ... (نفس تصميمك الحالي)
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
@@ -337,6 +508,21 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     );
   }
 
+  Widget _buildLoadingState() {
+    return const Padding(
+      padding: EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('جاري تحميل الفواتير...'),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
     return Container(
       padding: const EdgeInsets.all(32),
@@ -358,5 +544,14 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
         ],
       ),
     );
+  }
+
+  Widget _buildLoadMoreIndicator() {
+    return _isLoadingMore
+        ? const Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: CircularProgressIndicator()),
+        )
+        : const SizedBox.shrink();
   }
 }

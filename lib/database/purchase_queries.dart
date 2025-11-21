@@ -7,6 +7,71 @@ class PurchaseQueries {
   final DatabaseHelper dbHelper = DatabaseHelper();
   final ProductQueries productQueries = ProductQueries();
 
+  // ثابت حجم الصفحة
+  static const int pageSize = 15;
+
+  // دالة جلب الفواتير بشكل مُرقّم
+  Future<List<PurchaseInvoice>> getPurchaseInvoicesPaginated({
+    required int page,
+    String? searchTerm,
+  }) async {
+    final db = await dbHelper.database;
+    final offset = (page - 1) * pageSize;
+
+    String whereClause = '';
+    List<dynamic> whereArgs = [];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      whereClause = 'invoice_number LIKE ? OR supplier LIKE ?';
+      whereArgs = ['%$searchTerm%', '%$searchTerm%'];
+    }
+
+    final query = '''
+      SELECT * FROM purchase_invoices 
+      ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
+      ORDER BY created_at DESC 
+      LIMIT ? OFFSET ?
+    ''';
+
+    whereArgs.addAll([pageSize, offset]);
+
+    final List<Map<String, dynamic>> maps = await db.rawQuery(query, whereArgs);
+
+    if (maps.isEmpty) {
+      return [];
+    }
+
+    // جلب المنتجات لكل فاتورة
+    return Future.wait(
+      maps.map((invoiceMap) async {
+        final items = await getPurchaseInvoiceItems(invoiceMap['id']);
+        return PurchaseInvoice.fromMap(invoiceMap).copyWith(items: items);
+      }),
+    );
+  }
+
+  // دالة جلب العدد الكلي للفواتير مع الفلترة
+  Future<int> getPurchaseInvoicesCount({String? searchTerm}) async {
+    final db = await dbHelper.database;
+
+    String whereClause = '';
+    List<dynamic> whereArgs = [];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      whereClause = 'invoice_number LIKE ? OR supplier LIKE ?';
+      whereArgs = ['%$searchTerm%', '%$searchTerm%'];
+    }
+
+    final query = '''
+      SELECT COUNT(*) as count FROM purchase_invoices 
+      ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
+    ''';
+
+    final result = await db.rawQuery(query, whereArgs);
+    return result.first['count'] as int? ?? 0;
+  }
+
+  // باقي الدوال تبقى كما هي...
   Future<PurchaseInvoice> insertPurchaseInvoice(PurchaseInvoice invoice) async {
     final db = await dbHelper.database;
     await db.transaction((txn) async {
@@ -17,12 +82,11 @@ class PurchaseQueries {
       );
 
       for (final item in invoice.items) {
-        // إضافة المنتج إلى الفاتورة
         await txn.insert('purchase_invoice_items', {
           ...item.toMap(),
           'invoice_id': invoiceId,
         });
-        // تحديث مخزون المنتج
+
         await txn.rawUpdate(
           '''
           UPDATE products 
@@ -40,7 +104,6 @@ class PurchaseQueries {
     final db = await dbHelper.database;
 
     await db.transaction((txn) async {
-      // 1. جلب المنتجات القديمة في الفاتورة لتعديل المخزون
       final oldItemsMaps = await txn.query(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
@@ -49,7 +112,6 @@ class PurchaseQueries {
       final oldItems =
           oldItemsMaps.map((map) => PurchaseInvoiceItem.fromMap(map)).toList();
 
-      // 2. إلغاء تأثير الفاتورة القديمة على المخزون (طرح الكميات القديمة)
       for (final oldItem in oldItems) {
         await txn.rawUpdate(
           '''
@@ -61,7 +123,6 @@ class PurchaseQueries {
         );
       }
 
-      // 3. تحديث بيانات الفاتورة الأساسية
       await txn.update(
         'purchase_invoices',
         invoice.toMap(),
@@ -69,20 +130,18 @@ class PurchaseQueries {
         whereArgs: [invoice.id],
       );
 
-      // 4. حذف جميع المنتجات القديمة المرتبطة بالفاتورة
       await txn.delete(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
         whereArgs: [invoice.id],
       );
 
-      // 5. إضافة المنتجات الجديدة وتحديث المخزون بها
       for (final newItem in invoice.items) {
         await txn.insert('purchase_invoice_items', {
           ...newItem.toMap(),
           'invoice_id': invoice.id,
         });
-        // تطبيق الكميات الجديدة على المخزون
+
         await txn.rawUpdate(
           '''
           UPDATE products 
@@ -95,24 +154,9 @@ class PurchaseQueries {
     });
   }
 
+  // الدالة الأصلية يمكن أن تبقى للتوافق
   Future<List<PurchaseInvoice>> getPurchaseInvoices() async {
-    final db = await dbHelper.database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'purchase_invoices',
-      orderBy: 'created_at DESC', // عرض الأحدث أولاً
-    );
-
-    if (maps.isEmpty) {
-      return [];
-    }
-
-    // جلب المنتجات لكل فاتورة
-    return Future.wait(
-      maps.map((invoiceMap) async {
-        final items = await getPurchaseInvoiceItems(invoiceMap['id']);
-        return PurchaseInvoice.fromMap(invoiceMap).copyWith(items: items);
-      }),
-    );
+    return getPurchaseInvoicesPaginated(page: 1);
   }
 
   Future<List<PurchaseInvoiceItem>> getPurchaseInvoiceItems(

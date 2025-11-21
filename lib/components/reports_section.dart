@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../database/report_queries.dart'; // استيراد الملف الجديد
+import '../database/report_queries.dart';
 import '../models/report_models.dart';
 import './reports/sales_report.dart';
 import './reports/purchases_report.dart';
@@ -7,6 +7,11 @@ import './reports/profits_report.dart';
 import './reports/top_selling_report.dart';
 import './reports/purchased_items_report.dart';
 import './reports/sold_items_report.dart';
+// استيراد التقارير الجديدة
+import './reports/payment_type_report.dart';
+import './reports/payment_status_report.dart';
+import './reports/payment_records_report.dart';
+import './reports/outstanding_debts_report.dart';
 import '../widgets/top_alert.dart';
 
 class ReportsSection extends StatefulWidget {
@@ -18,15 +23,14 @@ class ReportsSection extends StatefulWidget {
 
 class _ReportsSectionState extends State<ReportsSection> {
   String _selectedReport = "sales";
-  // --- تعديل: استخدام controllers لتسهيل التحكم ---
   late TextEditingController _dateFromController;
   late TextEditingController _dateToController;
   final ReportQueries _reportQueries = ReportQueries();
 
-  // --- الحالة الجديدة للواجهة ---
   bool _isLoading = false;
-  dynamic _reportData; // سيحتوي على بيانات التقرير بعد جلبها
+  dynamic _reportData;
 
+  // تحديث قائمة أنواع التقارير بإضافة التقارير الجديدة
   final List<Map<String, String>> _reportTypes = [
     {"value": "sales", "label": "تقرير المبيعات"},
     {"value": "purchases", "label": "تقرير المشتريات"},
@@ -34,6 +38,10 @@ class _ReportsSectionState extends State<ReportsSection> {
     {"value": "top-selling", "label": "المنتجات الأكثر مبيعاً"},
     {"value": "purchased-items", "label": "المنتجات المشتراة"},
     {"value": "sold-items", "label": "المنتجات المباعة"},
+    {"value": "payment-types", "label": "المبيعات حسب نوع الدفع"},
+    {"value": "payment-status", "label": "حالة السداد"},
+    {"value": "payment-records", "label": "سجلات السداد"},
+    {"value": "outstanding-debts", "label": "الديون المستحقة"},
   ];
 
   @override
@@ -42,7 +50,6 @@ class _ReportsSectionState extends State<ReportsSection> {
     final today = _getFormattedDate(DateTime.now());
     _dateFromController = TextEditingController(text: today);
     _dateToController = TextEditingController(text: today);
-    // جلب التقرير الافتراضي عند فتح الصفحة
     _generateReport();
   }
 
@@ -58,17 +65,20 @@ class _ReportsSectionState extends State<ReportsSection> {
   }
 
   Future<void> _generateReport() async {
-    if (_dateFromController.text.isEmpty || _dateToController.text.isEmpty) {
-      TopAlert.showError(
-        context: context,
-        message: 'يرجى تحديد تاريخ البداية والنهاية',
-      );
-      return;
+    // بالنسبة لتقرير الديون المستحقة، لا نحتاج لتواريخ
+    if (_selectedReport != "outstanding-debts") {
+      if (_dateFromController.text.isEmpty || _dateToController.text.isEmpty) {
+        TopAlert.showError(
+          context: context,
+          message: 'يرجى تحديد تاريخ البداية والنهاية',
+        );
+        return;
+      }
     }
 
     setState(() {
       _isLoading = true;
-      _reportData = null; // تفريغ البيانات القديمة
+      _reportData = null;
     });
 
     try {
@@ -95,12 +105,23 @@ class _ReportsSectionState extends State<ReportsSection> {
         case "sold-items":
           data = await _reportQueries.getSoldItems(from, to);
           break;
+        case "payment-types":
+          data = await _reportQueries.getSalesByPaymentType(from, to);
+          break;
+        case "payment-status":
+          data = await _reportQueries.getPaymentStatusReport(from, to);
+          break;
+        case "payment-records":
+          data = await _reportQueries.getPaymentRecords(from, to);
+          break;
+        case "outstanding-debts":
+          data = await _reportQueries.getOutstandingDebts();
+          break;
       }
       setState(() {
         _reportData = data;
       });
     } catch (e) {
-      // ignore: use_build_context_synchronously
       TopAlert.showError(context: context, message: 'حدث خطأ: $e');
     } finally {
       setState(() {
@@ -139,6 +160,22 @@ class _ReportsSectionState extends State<ReportsSection> {
         );
       case "sold-items":
         return SoldItemsReport(data: _reportData as List<ProductReportData>);
+      case "payment-types":
+        return PaymentTypeReport(
+          data: _reportData as List<PaymentTypeReportData>,
+        );
+      case "payment-status":
+        return PaymentStatusReport(
+          data: _reportData as List<PaymentStatusReportData>,
+        );
+      case "payment-records":
+        return PaymentRecordsReport(
+          data: _reportData as List<PaymentRecordData>,
+        );
+      case "outstanding-debts":
+        return OutstandingDebtsReport(
+          data: _reportData as List<OutstandingDebtData>,
+        );
       default:
         return const SizedBox();
     }
@@ -208,9 +245,8 @@ class _ReportsSectionState extends State<ReportsSection> {
                           if (value != null && value != _selectedReport) {
                             setState(() {
                               _selectedReport = value;
-                              _reportData =
-                                  null; // تفريغ البيانات القديمة عند تغيير التقرير
-                              _isLoading = false; // إعادة تعيين حالة التحميل
+                              _reportData = null;
+                              _isLoading = false;
                             });
                           }
                         },
@@ -218,55 +254,66 @@ class _ReportsSectionState extends State<ReportsSection> {
                     ),
                     const SizedBox(width: 16),
 
-                    // Date From
-                    Expanded(
-                      child: TextField(
-                        controller: _dateFromController,
-                        decoration: const InputDecoration(
-                          labelText: "من تاريخ",
-                          border: OutlineInputBorder(),
-                          suffixIcon: Icon(Icons.calendar_today),
+                    // إظهار منتقي التاريخ فقط للتقارير التي تحتاج تواريخ
+                    if (_selectedReport != "outstanding-debts") ...[
+                      // Date From
+                      Expanded(
+                        child: TextField(
+                          controller: _dateFromController,
+                          decoration: const InputDecoration(
+                            labelText: "من تاريخ",
+                            border: OutlineInputBorder(),
+                            suffixIcon: Icon(Icons.calendar_today),
+                          ),
+                          readOnly: true,
+                          onTap: () async {
+                            final date = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (date != null) {
+                              _dateFromController.text = _getFormattedDate(
+                                date,
+                              );
+                            }
+                          },
                         ),
-                        readOnly: true,
-                        onTap: () async {
-                          final date = await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2030),
-                          );
-                          if (date != null) {
-                            _dateFromController.text = _getFormattedDate(date);
-                          }
-                        },
                       ),
-                    ),
-                    const SizedBox(width: 16),
+                      const SizedBox(width: 16),
 
-                    // Date To
-                    Expanded(
-                      child: TextField(
-                        controller: _dateToController,
-                        decoration: const InputDecoration(
-                          labelText: "إلى تاريخ",
-                          border: OutlineInputBorder(),
-                          suffixIcon: Icon(Icons.calendar_today),
+                      // Date To
+                      Expanded(
+                        child: TextField(
+                          controller: _dateToController,
+                          decoration: const InputDecoration(
+                            labelText: "إلى تاريخ",
+                            border: OutlineInputBorder(),
+                            suffixIcon: Icon(Icons.calendar_today),
+                          ),
+                          readOnly: true,
+                          onTap: () async {
+                            final date = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (date != null) {
+                              _dateToController.text = _getFormattedDate(date);
+                            }
+                          },
                         ),
-                        readOnly: true,
-                        onTap: () async {
-                          final date = await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2030),
-                          );
-                          if (date != null) {
-                            _dateToController.text = _getFormattedDate(date);
-                          }
-                        },
                       ),
-                    ),
-                    const SizedBox(width: 16),
+                      const SizedBox(width: 16),
+                    ] else ...[
+                      // مساحة فارغة بدلاً من منتقي التاريخ لتقرير الديون
+                      const Expanded(child: SizedBox()),
+                      const SizedBox(width: 16),
+                      const Expanded(child: SizedBox()),
+                      const SizedBox(width: 16),
+                    ],
 
                     // Generate Button
                     Expanded(
@@ -295,6 +342,7 @@ class _ReportsSectionState extends State<ReportsSection> {
           ),
         ),
         const SizedBox(height: 16),
+
         // Report Content
         Expanded(
           child: SingleChildScrollView(

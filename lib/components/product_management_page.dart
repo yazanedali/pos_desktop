@@ -19,31 +19,125 @@ class ProductManagementPage extends StatefulWidget {
 class _ProductManagementPageState extends State<ProductManagementPage> {
   final CategoryQueries _categoryQueries = CategoryQueries();
   final ProductQueries _productQueries = ProductQueries();
+  final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
 
   List<Category> _categories = [];
   List<Product> _products = [];
-  String _searchTerm = "";
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  int _currentPage = 1;
+  int _totalProductsCount = 0;
+
+  // متغيرات الفلترة
+  int? _selectedCategoryId;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _setupScrollListener();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _setupScrollListener() {
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels ==
+          _scrollController.position.maxScrollExtent) {
+        _loadMoreProducts();
+      }
+    });
+  }
+
+  void _onCategorySelected(int? categoryId) {
+    setState(() {
+      _selectedCategoryId = categoryId;
+    });
+    _loadProducts(reset: true);
   }
 
   Future<void> _loadData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
+
     final results = await Future.wait([
       _categoryQueries.getAllCategories(),
-      _productQueries.getAllProducts(),
+      _loadProducts(reset: true),
     ]);
+
     if (!mounted) return;
     setState(() {
       _categories = results[0] as List<Category>;
-      _products = results[1] as List<Product>;
       _isLoading = false;
     });
+  }
+
+  Future<void> _loadProducts({bool reset = true}) async {
+    try {
+      if (reset) {
+        setState(() {
+          _currentPage = 1;
+          _hasMore = true;
+        });
+      }
+
+      final products = await _productQueries.getProductsPaginated(
+        page: _currentPage,
+        searchTerm:
+            _searchController.text.isNotEmpty ? _searchController.text : null,
+        categoryId: _selectedCategoryId,
+      );
+
+      // الحصول على العدد الكلي للمنتجات (مع الفلترة)
+      final totalCount = await _productQueries.getProductsCount(
+        searchTerm:
+            _searchController.text.isNotEmpty ? _searchController.text : null,
+        categoryId: _selectedCategoryId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        if (reset) {
+          _products = products;
+        } else {
+          _products.addAll(products);
+        }
+        _totalProductsCount = totalCount;
+        _hasMore = products.length == ProductQueries.pageSize;
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+
+      TopAlert.showError(
+        context: context,
+        message: 'حدث خطأ أثناء تحميل المنتجات',
+      );
+    }
+  }
+
+  Future<void> _loadMoreProducts() async {
+    if (_isLoadingMore || !_hasMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    _currentPage++;
+    await _loadProducts(reset: false);
   }
 
   void _showProductDialog({Product? product}) async {
@@ -61,7 +155,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
       context: context,
       builder:
           (ctx) => ProductDialog(
-            product: productWithPackages, // تمرير المنتج مع حزمه
+            product: productWithPackages,
             categories: _categories,
             onSave: (Product productToSave) async {
               Navigator.of(ctx).pop();
@@ -71,25 +165,20 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                     product.id!,
                     productToSave,
                   );
-                  // ... (رسالة النجاح)
                   TopAlert.showSuccess(
-                    // ignore: use_build_context_synchronously
                     context: context,
                     message: "تم تحديث المنتج '${productToSave.name}' بنجاح",
                   );
                 } else {
                   await _productQueries.createProduct(productToSave);
-                  // ... (رسالة النجاح)
                   TopAlert.showSuccess(
-                    // ignore: use_build_context_synchronously
                     context: context,
                     message: "تم إضافة المنتج '${productToSave.name}' بنجاح",
                   );
                 }
-                await _loadData();
+                await _loadProducts(reset: true);
               } catch (e) {
                 TopAlert.showError(
-                  // ignore: use_build_context_synchronously
                   context: context,
                   message: "حدث خطأ أثناء الحفظ: $e",
                 );
@@ -129,14 +218,12 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                 try {
                   await _productQueries.deleteProduct(id);
                   TopAlert.showSuccess(
-                    // ignore: use_build_context_synchronously
                     context: context,
                     message: "تم حذف المنتج '$productName' بنجاح",
                   );
-                  await _loadData();
+                  await _loadProducts(reset: true);
                 } catch (e) {
                   TopAlert.showError(
-                    // ignore: use_build_context_synchronously
                     context: context,
                     message: "حدث خطأ أثناء الحذف: $e",
                   );
@@ -149,42 +236,16 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
     );
   }
 
-  // --- === 1. تعديل منطق البحث ليشمل الباركود والفئة === ---
-  List<Product> get _filteredProducts {
-    if (_searchTerm.isEmpty) return _products;
+  void _onSearch(String value) {
+    _loadProducts(reset: true);
+  }
 
-    final lowerCaseSearchTerm = _searchTerm.toLowerCase();
-
-    return _products.where((product) {
-      // البحث في اسم المنتج
-      final nameMatch = product.name.toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
-
-      // البحث في الباركود (مع التحقق من أنه ليس null)
-      final barcodeMatch = (product.barcode ?? '').toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
-
-      // البحث في اسم الفئة
-      // أولاً، نجد الفئة المرتبطة بالمنتج
-      final category = _categories.firstWhere(
-        (cat) => cat.id == product.categoryId,
-        orElse:
-            () => Category(
-              id: 0,
-              name: '',
-              color: '',
-            ), // fallback آمن في حال لم يتم العثور على الفئة
-      );
-      // ثانياً، نقارن اسم الفئة
-      final categoryMatch = category.name.toLowerCase().contains(
-        lowerCaseSearchTerm,
-      );
-
-      // إرجاع المنتج إذا تطابق أي من الشروط الثلاثة
-      return nameMatch || barcodeMatch || categoryMatch;
-    }).toList();
+  void _clearFilters() {
+    setState(() {
+      _selectedCategoryId = null;
+      _searchController.clear();
+    });
+    _loadProducts(reset: true);
   }
 
   @override
@@ -193,20 +254,69 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
       body:
           _isLoading
               ? const Center(child: CircularProgressIndicator())
-              : ListView(
-                padding: const EdgeInsets.all(24.0),
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 20),
-                  CategoryManagementBar(
-                    categories: _categories,
-                    onCategoriesUpdate: _loadData,
-                  ),
-                  const SizedBox(height: 20),
-                  _buildSearchCard(),
-                  const SizedBox(height: 20),
-                  _buildProductsContent(),
-                ],
+              : RefreshIndicator(
+                onRefresh: _loadData,
+                child: CustomScrollView(
+                  controller: _scrollController, // مهم!
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          children: [
+                            _buildHeader(),
+                            const SizedBox(height: 20),
+                            CategoryManagementBar(
+                              categories: _categories,
+                              onCategoriesUpdate: _loadData,
+                            ),
+                            const SizedBox(height: 20),
+                            _buildSearchCard(),
+                            const SizedBox(height: 20),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Products List Header
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: _buildProductsHeader(),
+                      ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 18)),
+
+                    // Products Grid
+                    _products.isEmpty
+                        ? SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: _buildEmptyState(),
+                          ),
+                        )
+                        : SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: ProductGrid(
+                              products: _products,
+                              categories: _categories,
+                              onEdit:
+                                  (product) =>
+                                      _showProductDialog(product: product),
+                              onDelete: _deleteProduct,
+                              hasMore: _hasMore,
+                              isLoadingMore: _isLoadingMore,
+                              onCategorySelected:
+                                  _onCategorySelected, // دالة التعامل مع اختيار الفئة
+                              selectedCategoryId:
+                                  _selectedCategoryId, // الفئة المحددة حالياً
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
               ),
     );
   }
@@ -240,49 +350,113 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
     );
   }
 
-  // --- === 2. تعديل النص الإرشادي في مربع البحث === ---
   Widget _buildSearchCard() {
-    return TextField(
-      onChanged: (value) => setState(() => _searchTerm = value),
-      decoration: InputDecoration(
-        hintText: "ابحث بالاسم, الباركود, أو الفئة...",
-        prefixIcon: const Icon(Icons.search),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              onChanged: _onSearch,
+              decoration: InputDecoration(
+                hintText: "ابحث بالاسم, الباركود, أو الفئة...",
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: _clearFilters,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_selectedCategoryId != null ||
+                _searchController.text.isNotEmpty)
+              Row(
+                children: [
+                  Text(
+                    'فلترة مفعلة',
+                    style: TextStyle(
+                      color: Colors.orange[700],
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  OutlinedButton(
+                    onPressed: _clearFilters,
+                    child: const Text('مسح الفلترة'),
+                  ),
+                ],
+              ),
+          ],
         ),
-        filled: true,
-        fillColor: Colors.grey[200],
       ),
     );
   }
 
-  Widget _buildProductsContent() {
-    if (_products.isEmpty) {
-      return EmptyStateWidget(
-        icon: Icons.inventory_2_outlined,
-        title: "لا توجد منتجات بعد",
-        message: "ابدأ بإضافة أول منتج لك لإدارة المخزون بسهولة.",
-        actionButton: ElevatedButton.icon(
-          onPressed: () => _showProductDialog(),
-          icon: const Icon(Icons.add),
-          label: const Text("إضافة أول منتج"),
+  Widget _buildProductsHeader() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.inventory_2, color: Colors.blue[800]),
+            const SizedBox(width: 8),
+            const Text(
+              "قائمة المنتجات",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              "($_totalProductsCount)",
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+            const Spacer(),
+            if (_selectedCategoryId != null)
+              Chip(
+                label: Text(
+                  'فئة: ${_categories.firstWhere((cat) => cat.id == _selectedCategoryId).name}',
+                ),
+                backgroundColor: Colors.blue[100],
+              ),
+          ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    if (_filteredProducts.isEmpty) {
+  Widget _buildEmptyState() {
+    if (_searchController.text.isNotEmpty || _selectedCategoryId != null) {
       return const EmptyStateWidget(
         icon: Icons.search_off,
         title: "لا توجد نتائج مطابقة",
-        message: "حاول استخدام كلمات بحث مختلفة للعثور على ما تبحث عنه.",
+        message: "حاول استخدام كلمات بحث مختلفة أو مسح الفلترة.",
       );
     }
-    return ProductGrid(
-      products: _filteredProducts,
-      categories: _categories,
-      onEdit: (product) => _showProductDialog(product: product),
-      onDelete: _deleteProduct,
+
+    return EmptyStateWidget(
+      icon: Icons.inventory_2_outlined,
+      title: "لا توجد منتجات بعد",
+      message: "ابدأ بإضافة أول منتج لك لإدارة المخزون بسهولة.",
+      actionButton: ElevatedButton.icon(
+        onPressed: () => _showProductDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text("إضافة أول منتج"),
+      ),
     );
   }
 }

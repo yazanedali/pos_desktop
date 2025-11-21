@@ -186,4 +186,100 @@ class ProductQueries {
     );
     return results.map((map) => ProductPackage.fromMap(map)).toList();
   }
+
+  // ********************************************************
+  // 1. ثابت لحجم الصفحة
+  // ********************************************************
+  static const int pageSize = 16;
+
+  // ********************************************************
+  // 2. دالة جلب المنتجات بشكل مُرقّم
+  // ********************************************************
+  Future<List<Product>> getProductsPaginated({
+    required int page,
+    String? searchTerm,
+    int? categoryId,
+  }) async {
+    final db = await dbHelper.database;
+    final offset = (page - 1) * pageSize;
+
+    // بناء شرط WHERE
+    final conditions = <String>['p.is_active = 1'];
+    final args = <Object>[];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      conditions.add('(p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)');
+      args.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
+    }
+
+    if (categoryId != null) {
+      conditions.add('p.category_id = ?');
+      args.add(categoryId);
+    }
+
+    final whereClause = conditions.join(' AND ');
+
+    // بناء الاستعلام مع LIMIT و OFFSET
+    final results = await db.rawQuery('''
+      SELECT 
+        p.id,
+        p.name,
+        p.price,
+        p.stock,
+        p.barcode,
+        p.created_at,
+        c.name as category,
+        c.color as category_color,
+        c.id as category_id
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE $whereClause
+      ORDER BY p.created_at DESC
+      LIMIT $pageSize OFFSET $offset
+    ''', args);
+
+    return results.map((map) => Product.fromMap(map)).toList();
+  }
+
+  // ********************************************************
+  // 3. دالة جلب العدد الكلي للمنتجات مع الفلترة والبحث
+  // ********************************************************
+  Future<int> getProductsCount({String? searchTerm, int? categoryId}) async {
+    final db = await dbHelper.database;
+
+    // بناء شرط WHERE
+    final conditions = <String>['p.is_active = 1'];
+    final args = <Object>[];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      conditions.add('(p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)');
+      args.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
+    }
+
+    if (categoryId != null) {
+      conditions.add('p.category_id = ?');
+      args.add(categoryId);
+    }
+
+    final whereClause = conditions.join(' AND ');
+
+    // الاستعلام عن العدد
+    final result = await db.rawQuery('''
+      SELECT 
+        COUNT(p.id) AS count
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE $whereClause
+    ''', args);
+
+    return result.first['count'] as int? ?? 0;
+  }
+
+  // ********************************************************
+  // 4. دالة لجلب كل الفئات (Categories) (مطلوبة للفلترة)
+  // ********************************************************
+  Future<List<Map<String, dynamic>>> getAllCategories() async {
+    final db = await dbHelper.database;
+    return await db.query('categories', orderBy: 'name');
+  }
 }

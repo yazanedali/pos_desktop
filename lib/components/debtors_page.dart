@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/dialogs/add_customer_dialog.dart';
 import 'package:pos_desktop/database/customer_queries.dart';
-import 'package:pos_desktop/models/customer.dart';
 import 'package:pos_desktop/models/debtor_info.dart';
 import 'package:pos_desktop/widgets/top_alert.dart';
 import 'package:pos_desktop/dialogs/customer_details_dialog.dart';
+import 'package:pos_desktop/dialogs/customer_dialog.dart';
 
 class DebtorsPage extends StatefulWidget {
   const DebtorsPage({super.key});
@@ -37,26 +37,24 @@ class _DebtorsPageState extends State<DebtorsPage> {
   }
 
   Future<void> _showAddCustomerDialog() async {
-    final newCustomer = await showDialog<Customer>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => const AddCustomerDialog(),
     );
 
-    if (newCustomer != null && mounted) {
+    if (result != null && mounted) {
       try {
-        await _customerQueries.insertCustomer(newCustomer);
+        // استدعاء الدالة الجديدة التي تتعامل مع كل شيء
+        await _customerQueries.insertCustomerWithOpeningBalance(result);
 
         TopAlert.showSuccess(
-          // ignore: use_build_context_synchronously
           context: context,
-          message: 'تمت إضافة العميل "${newCustomer.name}" بنجاح',
+          message: 'تمت إضافة العميل "${result['name']}" بنجاح',
         );
 
-        // تحديث القائمة بعد الإضافة
-        _loadDebtorsData();
+        _loadDebtorsData(); // تحديث القائمة
       } catch (e) {
         TopAlert.showError(
-          // ignore: use_build_context_synchronously
           context: context,
           message: 'فشل في إضافة العميل: $e',
         );
@@ -173,6 +171,67 @@ class _DebtorsPageState extends State<DebtorsPage> {
             totalDebt: debtor.totalDebt,
           ),
     );
+  }
+
+  Future<void> _showCustomer(DebtorInfo debtor) async {
+    // 1. جلب كل بيانات العميل من قاعدة البيانات
+    final fullCustomer = await _customerQueries.getCustomerById(
+      debtor.customerId,
+    );
+    if (fullCustomer == null || !mounted) return;
+
+    // 2. عرض نافذة التفاصيل
+    showDialog(
+      context: context,
+      builder:
+          (context) => CustomerDialog(
+            customer: fullCustomer,
+            debtorInfo: debtor,
+            onEdit: () {
+              // 3. عند الضغط على تعديل، أغلق نافذة التفاصيل وافتح نافذة التعديل
+              Navigator.of(context).pop();
+            },
+          ),
+    );
+  }
+
+  void _confirmDelete(DebtorInfo debtor) async {
+    final canDelete = await _customerQueries.canDeleteCustomer(
+      debtor.customerId,
+    );
+
+    if (!canDelete) {
+      TopAlert.showError(
+        context: context,
+        message: "لا يمكن حذف العميل لأنه عليه دين!",
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (_) => AlertDialog(
+            title: Text("تأكيد الحذف"),
+            content: Text("هل تريد حذف ${debtor.customerName}؟"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text("إلغاء"),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text("حذف"),
+              ),
+            ],
+          ),
+    );
+
+    if (confirm == true) {
+      await _customerQueries.deleteCustomer(debtor.customerId);
+      TopAlert.showSuccess(context: context, message: "تم حذف العميل");
+      _loadDebtorsData();
+    }
   }
 
   @override
@@ -331,53 +390,59 @@ class _DebtorsPageState extends State<DebtorsPage> {
           final debtor = debtors[index];
           final bool hasDebt = debtor.totalDebt > 0;
 
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-            ),
-            child: Row(
-              children: [
-                Expanded(flex: 4, child: Text(debtor.customerName)),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    "${debtor.totalDebt.toStringAsFixed(2)} شيكل",
-                    style: TextStyle(
-                      color: hasDebt ? Colors.red : Colors.green,
-                      fontWeight: FontWeight.bold,
+          return InkWell(
+            onTap: () => _showCustomer(debtor),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(flex: 4, child: Text(debtor.customerName)),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      "${debtor.totalDebt.toStringAsFixed(2)} شيكل",
+                      style: TextStyle(
+                        color: hasDebt ? Colors.red : Colors.green,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // زر سداد الدين
-                      IconButton(
-                        onPressed: () => _showPaymentDialog(debtor),
-                        icon: const Icon(
-                          Icons.payment,
-                          size: 20,
-                          color: Colors.green,
+                  Expanded(
+                    flex: 2,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          onPressed: () => _showPaymentDialog(debtor),
+                          icon: const Icon(
+                            Icons.payment,
+                            size: 20,
+                            color: Colors.green,
+                          ),
+                          tooltip: "سداد دفعة",
                         ),
-                        tooltip: "سداد دفعة",
-                      ),
-                      // زر عرض التفاصيل
-                      IconButton(
-                        onPressed: () => _showCustomerDetails(debtor),
-                        icon: const Icon(
-                          Icons.visibility,
-                          size: 20,
-                          color: Colors.blue,
+                        IconButton(
+                          onPressed: () => _showCustomerDetails(debtor),
+                          icon: const Icon(
+                            Icons.visibility,
+                            size: 20,
+                            color: Colors.blue,
+                          ),
+                          tooltip: "عرض التفاصيل",
                         ),
-                        tooltip: "عرض التفاصيل",
-                      ),
-                    ],
+                        IconButton(
+                          onPressed: () => _confirmDelete(debtor),
+                          icon: Icon(Icons.delete, color: Colors.red),
+                          tooltip: "حذف العميل",
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         },

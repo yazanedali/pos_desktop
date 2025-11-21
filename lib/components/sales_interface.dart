@@ -5,6 +5,8 @@ import 'package:pos_desktop/models/cart_item.dart';
 import 'package:pos_desktop/models/category.dart';
 import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/models/product_package.dart';
+import 'package:pos_desktop/models/sales_invoice.dart';
+import 'package:pos_desktop/services/sales_invoice_service.dart';
 import 'package:pos_desktop/services/sales_service.dart';
 import './sales/barcode_reader.dart';
 import './sales/products_grid.dart';
@@ -27,6 +29,8 @@ class _SalesInterfaceState extends State<SalesInterface> {
   final CategoryQueries _categoryQueries = CategoryQueries();
   final SalesService _salesService = SalesService();
   final CustomerQueries _customerQueries = CustomerQueries();
+  final SalesInvoiceService _invoiceService =
+      SalesInvoiceService(); // <-- أضف هذا
 
   List<Product> _products = [];
   List<Category> _categories = [];
@@ -36,6 +40,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
   bool _isLoading = true;
   bool _isProcessingSale = false;
   final Uuid _uuid = const Uuid();
+
+  // متغيرات Lazy Loading
+  int _currentPage = 1;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  String _searchTerm = "";
+  int? _selectedCategoryId;
 
   @override
   void initState() {
@@ -47,14 +58,45 @@ class _SalesInterfaceState extends State<SalesInterface> {
     setState(() => _isLoading = true);
     try {
       final results = await Future.wait([
-        _productQueries.getAllProducts(),
+        _loadProducts(reset: true),
         _categoryQueries.getAllCategories(),
         _customerQueries.getAllCustomers(),
       ]);
 
-      List<Product> productsFromDb = results[0] as List<Product>;
+      if (!mounted) return;
 
-      for (var product in productsFromDb) {
+      setState(() {
+        _categories = results[1] as List<Category>;
+        _customers = results[2] as List<Customer>;
+        _isLoading = false;
+      });
+    } catch (e) {
+      TopAlert.showError(
+        context: context,
+        message: 'خطأ في تحميل البيانات: $e',
+      );
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadProducts({bool reset = true}) async {
+    try {
+      if (reset) {
+        setState(() {
+          _currentPage = 1;
+          _hasMore = true;
+          if (_isLoadingMore) _isLoadingMore = false;
+        });
+      }
+
+      final products = await _productQueries.getProductsPaginated(
+        page: _currentPage,
+        searchTerm: _searchTerm.isNotEmpty ? _searchTerm : null,
+        categoryId: _selectedCategoryId,
+      );
+
+      // جلب الحزم لكل منتج
+      for (var product in products) {
         if (product.id != null) {
           product.packages = await _productQueries.getPackagesForProduct(
             product.id!,
@@ -65,21 +107,58 @@ class _SalesInterfaceState extends State<SalesInterface> {
       if (!mounted) return;
 
       setState(() {
-        _products = productsFromDb;
-        _categories = results[1] as List<Category>;
-        _customers = results[2] as List<Customer>;
+        if (reset) {
+          _products = products;
+        } else {
+          _products.addAll(products);
+        }
+        _hasMore = products.length == ProductQueries.pageSize;
+        _isLoading = false;
+        _isLoadingMore = false;
       });
     } catch (e) {
-      TopAlert.showError(
-        context: context,
-        message: 'خطأ في تحميل البيانات: $e',
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
     }
   }
 
-  // ***** دالة مساعدة للتحقق من المخزون *****
+  Future<void> _loadMoreProducts() async {
+    if (_isLoadingMore || !_hasMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    _currentPage++;
+    await _loadProducts(reset: false);
+  }
+
+  void _onSearch(String searchTerm) {
+    setState(() {
+      _searchTerm = searchTerm;
+    });
+    _loadProducts(reset: true);
+  }
+
+  void _onCategorySelected(int? categoryId) {
+    setState(() {
+      _selectedCategoryId = categoryId;
+    });
+    _loadProducts(reset: true);
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchTerm = "";
+      _selectedCategoryId = null;
+    });
+    _loadProducts(reset: true);
+  }
+
+  // باقي الدوال تبقى كما هي بدون تغيير...
   bool _checkStockAvailability(
     Product product,
     double quantity,
@@ -89,7 +168,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
     return totalQuantityInPieces <= product.stock;
   }
 
-  // ***** دالة مساعدة لحساب الكمية الإجمالية بالقطع *****
   double _getTotalQuantityInPieces(double quantity, double unitQuantity) {
     return quantity * unitQuantity;
   }
@@ -104,7 +182,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
     }
 
     setState(() {
-      // البحث عن المنتج بالوحدة الأساسية
       final existingItemIndex = _cartItems.indexWhere(
         (item) => item.id == product.id && item.unitQuantity == 1.0,
       );
@@ -127,7 +204,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
         }
         existingItem.quantity = newQuantity;
       } else {
-        // التحقق من المخزون قبل الإضافة
         if (!_checkStockAvailability(product, 1.0, 1.0)) {
           TopAlert.showError(
             context: context,
@@ -137,7 +213,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
           return;
         }
 
-        // إنشاء قائمة الحزم المتاحة
         final List<ProductPackage> availablePackages = [
           ProductPackage(
             name: 'حبة',
@@ -157,7 +232,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
             stock: product.stock,
             unitName: 'حبة',
             unitQuantity: 1.0,
-            availablePackages: availablePackages, // <-- تمرير الحزم المتاحة
+            availablePackages: availablePackages,
           ),
         );
       }
@@ -169,7 +244,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
     );
   }
 
-  // في SalesInterface
   void _updateCartItemUnit(
     String cartItemId,
     ProductPackage newPackage,
@@ -183,19 +257,16 @@ class _SalesInterfaceState extends State<SalesInterface> {
         final item = _cartItems[itemIndex];
         final product = _products.firstWhere((p) => p.id == item.id);
 
-        // حساب الكمية الإجمالية بالقطع
         double newQuantity;
         if (resetQuantity) {
-          newQuantity = 1.0; // كمية جديدة = 1 من الوحدة الجديدة
+          newQuantity = 1.0;
         } else {
-          // الحفاظ على نفس الكمية الإجمالية بالقطع
           final currentTotalPieces = item.quantity * item.unitQuantity;
           newQuantity = currentTotalPieces / newPackage.containedQuantity;
         }
 
         final totalPieces = newQuantity * newPackage.containedQuantity;
 
-        // التحقق من المخزون
         if (totalPieces > product.stock) {
           TopAlert.showError(
             context: context,
@@ -228,7 +299,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
         final item = _cartItems[itemIndex];
         final product = _products.firstWhere((p) => p.id == item.id);
 
-        // التحقق من المخزون مع مراعاة الوحدة
         final totalPieces = _getTotalQuantityInPieces(
           newQuantity,
           item.unitQuantity,
@@ -253,7 +323,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
     });
   }
 
-  // ***** التحقق النهائي من المخزون قبل إتمام البيع *****
   bool _validateStockBeforeCheckout() {
     for (final cartItem in _cartItems) {
       final product = _products.firstWhere((p) => p.id == cartItem.id);
@@ -280,7 +349,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
       return;
     }
 
-    // ***** التحقق النهائي من المخزون قبل المتابعة *****
     if (!_validateStockBeforeCheckout()) {
       return;
     }
@@ -296,15 +364,12 @@ class _SalesInterfaceState extends State<SalesInterface> {
       // تجاهل الخطأ مؤقتاً والمتابعة
     }
 
-    // حساب الإجمالي
     final total = _cartItems.fold(
       0.0,
       (sum, item) => sum + (item.price * item.quantity),
     );
 
-    // عرض شاشة الدفع
     final paymentResult = await showDialog<Map<String, dynamic>>(
-      // ignore: use_build_context_synchronously
       context: context,
       builder:
           (context) => PaymentDialog(totalAmount: total, customers: _customers),
@@ -322,26 +387,49 @@ class _SalesInterfaceState extends State<SalesInterface> {
       final int? customerId = paymentResult['customer_id'];
       final double remainingAmount = total - paidAmount;
 
-      // ***** التحقق النهائي من المخزون قبل الحفظ في قاعدة البيانات *****
       if (!_validateStockBeforeCheckout()) {
         setState(() => _isProcessingSale = false);
         return;
       }
 
-      final invoiceNumber = await _salesService.createSaleInvoice(
-        cartItems: _cartItems,
-        cashier: "كاشير",
+      // تحويل CartItem إلى SaleInvoiceItem
+      final List<SaleInvoiceItem> invoiceItems =
+          _cartItems.map((cartItem) {
+            return SaleInvoiceItem(
+              invoiceId: 0, // سيتم تعبئته لاحقاً
+              productId: cartItem.id,
+              productName: cartItem.name,
+              price: cartItem.price,
+              quantity: cartItem.quantity,
+              total: cartItem.price * cartItem.quantity,
+            );
+          }).toList();
+
+      // إنشاء رقم فاتورة فريد
+      final now = DateTime.now();
+      final invoiceNumber =
+          'INV-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+
+      // استدعاء الدالة بشكل صحيح
+      final invoice = await _invoiceService.createInvoice(
+        invoiceNumber: invoiceNumber,
+        date:
+            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+        time:
+            '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+        items: invoiceItems,
         total: total,
         paidAmount: paidAmount,
         remainingAmount: remainingAmount,
-        paymentMethod: paymentMethod,
+        cashier: "كاشير", // يمكنك تغيير هذا لاسم المستخدم الحالي
         customerId: customerId,
+        paymentMethod: paymentMethod,
       );
 
       TopAlert.showSuccess(
-        // ignore: use_build_context_synchronously
         context: context,
-        message: 'تمت عملية البيع بنجاح - رقم الفاتورة: $invoiceNumber',
+        message:
+            'تمت عملية البيع بنجاح - رقم الفاتورة: ${invoice.invoiceNumber}',
       );
 
       await _refreshData();
@@ -349,8 +437,8 @@ class _SalesInterfaceState extends State<SalesInterface> {
         _cartItems.clear();
       });
     } catch (e) {
-      // ignore: use_build_context_synchronously
       TopAlert.showError(context: context, message: 'خطأ في إتمام البيع: $e');
+      rethrow;
     } finally {
       if (mounted) {
         setState(() => _isProcessingSale = false);
@@ -380,6 +468,15 @@ class _SalesInterfaceState extends State<SalesInterface> {
                     products: _products,
                     categories: _categories,
                     onProductAdded: _addToCart,
+                    // إضافة خصائص Lazy Loading
+                    hasMore: _hasMore,
+                    isLoadingMore: _isLoadingMore,
+                    onLoadMore: _loadMoreProducts,
+                    onSearch: _onSearch,
+                    onCategorySelected: _onCategorySelected,
+                    selectedCategoryId: _selectedCategoryId,
+                    searchTerm: _searchTerm,
+                    onClearFilters: _clearFilters,
                   ),
                 ),
               ],
