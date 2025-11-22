@@ -1,55 +1,111 @@
-# POS Desktop Application
+# 🖥️ POS Desktop Application  
+A modern, offline-first Point of Sale (POS) system built with **Flutter** and **SQLite**, designed for small and medium businesses.  
+Fast, lightweight, and optimized for Windows desktop environments — no internet required.
 
-**POS Desktop** is a powerful and lightweight Point of Sale (POS) system designed to manage products, sales, purchases, and reports entirely offline. Built using **Flutter** for a modern UI and **SQLite** for local storage, this application runs on Windows and does not require an internet connection, making it ideal for small and medium businesses.
+---
 
-## Features
+## ✨ Key Features
 
-- **Offline First:** Works 100% without an internet connection. All data is stored locally on your machine.
-- **Product Management:** Easily add, edit, and remove products, including categories, prices, stock, and barcodes.
-- **Sales Module:** Create invoices, manage a shopping cart, and track sales in real time.
-- **Purchase Module:** Record purchase invoices and manage stock updates.
-- **Reports & Analytics:** Generate reports such as:
-  - Sales report
-  - Purchases report
-  - Profit report
-  - Top-selling products
-  - Purchased items
-  - Sold items
-- **Barcode Scanner Support:** Add products quickly using a barcode scanner or manually entering the barcode.
-- **Interactive UI:** Modern interface with hover effects, dynamic grids, and responsive controls.
-- **Theming:** Supports both light and dark modes.
-- **Local Database:** SQLite database is fully integrated within the project, easy to back up or move.
-- **User Notifications:** Inline notifications for success/error events instead of intrusive popups.
+### 📴 Offline First  
+- Works **100% locally** without internet.  
+- All data is stored securely in an integrated SQLite database.
 
-## Screenshots
+### 📦 Product Management  
+- Add, edit, delete products and categories.  
+- Manage stock levels, pricing, and barcodes.  
+- Fast product lookup via barcode scanner.
 
-*(You can add screenshots of your main interface, barcode reader, shopping cart, and reports here)*
+### 🛒 Sales Module  
+- Create invoices instantly.
+- Smart shopping cart with dynamic totals and discounts.
+- Supports both **Keyboard navigation** and **barcode input**.
 
-## Installation
+### 📥 Purchase Module  
+- Record purchase invoices.
+- Automatic stock updates.
+- Track supplier-based purchases.
 
-1. Clone the repository:
-   git clone https://github.com/username/pos_desktop.git
-2. Navigate to the project folder:
-  cd pos_desktop
-3. Get dependencies:
-  flutter pub get
-4. Run the application on Windows:
-  flutter run -d windows
+### 👥 Customer Management  
+- Dedicated customer management page.
+- Add/edit/delete customers.
+- Track outstanding balances for each customer.
+- View full payment history per customer.
 
-## Usage
+### 💰 Payment Types  
+- Supports **Cash Payments**, **Credit (Deferred) Payments**, and mixed payments.
+- Easily manage due amounts.
+- Record partial or full repayments.
 
-  - Launch the application.
+### 📊 Reports & Analytics  
+- Sales Report  
+- Purchases Report  
+- Profit / Loss Report  
+- Top-Selling Products  
+- Detailed Cash vs Credit Transactions  
+- Customer-specific outstanding balances  
+- All reports support:
+  - 🔍 Full search
+  - 📅 Date filtering
+  - 🏷️ Category filtering
 
-  - Add categories and products if the database is empty.
+### 🔍 Global Filtering & Search  
+Every page supports:
+- Search by name, barcode, or category  
+- Date range filters  
+- Sorting by newest, price, or stock  
 
-  - Start adding products to the cart using either the barcode reader or the product grid.
+### 🎨 Modern Desktop UI  
+- Hover effects, shadows, and smooth layout.
+- Responsive grids and panels.
+- Light / Dark mode support.
+- Inline non-intrusive notifications.
 
-  - Generate invoices and reports directly from the interface.
+---
 
-## Tech Stack
+## 🖼️ Screenshots  
+_Add your application interface images here…_  
+You can include:  
+- Main dashboard  
+- Sales page  
+- Customer management  
+- Reports section  
+- Light/Dark themes  
 
-  - Flutter: Modern UI and cross-platform capabilities
+---
 
-  - SQLite: Local database for offline storage
+## 🛠️ Tech Stack
 
-  - Dart: Programming language for application logic
+| Technology | Purpose |
+|-----------|---------|
+| 🐦 Flutter | UI & desktop application |
+| 🗂️ SQLite | Local offline database |
+| 🎯 Dart | Application logic |
+| 🖥️ Windows | Target platform |
+
+---
+
+## 📥 Installation
+
+git clone https://github.com/username/pos_desktop.git
+cd pos_desktop
+flutter pub get
+flutter run -d windows
+
+---
+
+## 🚀 Usage
+
+Launch the application.
+
+Add categories, customers, and products (first-time setup).
+
+Start selling using grid selection or barcode scanner.
+
+Generate invoices and view live reports.
+
+Manage customer debts and record repayments quickly.
+
+Export database or copy it as a backup when needed.
+
+
+
