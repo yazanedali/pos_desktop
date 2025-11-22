@@ -86,9 +86,12 @@ You can include:
 
 ## 📥 Installation
 
-git clone https://github.com/yazanedali/pos_desktop.git\n
+git clone https://github.com/yazanedali/pos_desktop.git
+
 cd pos_desktop
+
 flutter pub get
+
 flutter run -d windows
 
 
