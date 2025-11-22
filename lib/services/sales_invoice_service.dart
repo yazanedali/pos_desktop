@@ -614,4 +614,84 @@ class SalesInvoiceService {
       }
     });
   }
+
+  //ارجاع فاتورة
+  Future<bool> returnInvoice(int invoiceId) async {
+    final db = await _dbHelper.database;
+
+    try {
+      await db.transaction((txn) async {
+        // 1. جلب بيانات الفاتورة والعناصر
+        final invoice = await txn.query(
+          'sales_invoices',
+          where: 'id = ?',
+          whereArgs: [invoiceId],
+        );
+
+        if (invoice.isEmpty) {
+          throw Exception('الفاتورة غير موجودة');
+        }
+
+        final items = await txn.query(
+          'sales_invoice_items',
+          where: 'invoice_id = ?',
+          whereArgs: [invoiceId],
+        );
+
+        // 2. إرجاع المخزون للمنتجات
+        for (final item in items) {
+          final productId = item['product_id'] as int;
+          final quantity = item['quantity'] as double;
+          final unitQuantity = item['unit_quantity'] as double? ?? 1.0;
+
+          final totalQuantity = quantity * unitQuantity;
+
+          await txn.rawUpdate(
+            '''
+          UPDATE products 
+          SET stock = stock + ?, 
+              updated_at = CURRENT_TIMESTAMP 
+          WHERE id = ?
+          ''',
+            [totalQuantity, productId],
+          );
+        }
+
+        // 3. إذا كان هناك عميل وديون، تحديث الديون
+        final invoiceData = invoice.first;
+        final customerId = invoiceData['customer_id'] as int?;
+        final remainingAmount =
+            (invoiceData['remaining_amount'] as num?)?.toDouble() ?? 0.0;
+
+        if (customerId != null && remainingAmount > 0) {
+          // هنا يمكنك إضافة منطق تحديث ديون العميل إذا كان لديك جدول للديون
+        }
+
+        // 4. حذف سجلات السداد المرتبطة بالفاتورة
+        await txn.delete(
+          'payment_records',
+          where: 'invoice_id = ?',
+          whereArgs: [invoiceId],
+        );
+
+        // 5. حذف عناصر الفاتورة
+        await txn.delete(
+          'sales_invoice_items',
+          where: 'invoice_id = ?',
+          whereArgs: [invoiceId],
+        );
+
+        // 6. حذف الفاتورة الرئيسية
+        await txn.delete(
+          'sales_invoices',
+          where: 'id = ?',
+          whereArgs: [invoiceId],
+        );
+      });
+
+      return true;
+    } catch (e) {
+      throw Exception('فشل في إرجاع الفاتورة: $e');
+    }
+  }
 }

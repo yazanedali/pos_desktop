@@ -1,17 +1,135 @@
 import 'package:flutter/material.dart';
+import 'package:pos_desktop/services/sales_invoice_service.dart';
+import 'package:pos_desktop/widgets/top_alert.dart';
 import '../../models/sales_invoice.dart';
 
 class InvoiceCard extends StatelessWidget {
   final SaleInvoice invoice;
   final VoidCallback onTap;
   final String customerName;
+  final bool showReturnButton;
+  final VoidCallback? onReturn;
 
   const InvoiceCard({
     super.key,
     required this.invoice,
     required this.onTap,
     required this.customerName,
+    this.showReturnButton = true,
+    this.onReturn,
   });
+
+  void _showReturnConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => Directionality(
+            textDirection: TextDirection.rtl, // 🍀 هنا التحويل لليمين
+            child: AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('تأكيد إرجاع الفاتورة'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'رقم الفاتورة: ${invoice.invoiceNumber}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'هل أنت متأكد من أنك تريد إرجاع هذه الفاتورة؟',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'سيتم:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('• إرجاع جميع المنتجات إلى المخزون'),
+                  const Text('• حذف الفاتورة نهائياً من النظام'),
+                  if (invoice.remainingAmount > 0)
+                    const Text('• إرجاع المبالغ المدفوعة والمديونية'),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '⚠️ لا يمكن التراجع عن هذه العملية',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              actionsAlignment:
+                  MainAxisAlignment.start, // يجعل الأزرار من اليمين
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('إلغاء'),
+                ),
+                ElevatedButton(
+                  onPressed: () => _returnInvoice(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('نعم، إرجاع الفاتورة'),
+                ),
+              ],
+            ),
+          ),
+    );
+  }
+
+  void _returnInvoice(BuildContext context) async {
+    try {
+      Navigator.pop(context); // إغلاق ديالوج التأكيد
+
+      // عرض مؤشر تحميل
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // استدعاء خدمة الإرجاع
+      final success = await SalesInvoiceService().returnInvoice(invoice.id!);
+
+      Navigator.pop(context); // إغلاق مؤشر التحميل
+
+      if (success) {
+        // إظهار رسالة نجاح
+        if (context.mounted) {
+          TopAlert.showSuccess(
+            context: context,
+            message: "تم إرجاع الفاتورة ${invoice.invoiceNumber} بنجاح.",
+          );
+
+          // تحديث القائمة
+          if (onReturn != null) {
+            onReturn!();
+          }
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // إغلاق مؤشر التحميل في حالة الخطأ
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطأ في إرجاع الفاتورة: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -94,6 +212,13 @@ class InvoiceCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const Spacer(),
+                        if (showReturnButton)
+                          IconButton(
+                            onPressed: () => _showReturnConfirmation(context),
+                            icon: const Icon(Icons.reply, color: Colors.red),
+                            tooltip: 'إرجاع الفاتورة',
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),

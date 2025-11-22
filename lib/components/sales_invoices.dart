@@ -345,6 +345,8 @@ class _SalesInvoicesState extends State<SalesInvoices> {
                         onTap: () => _showInvoiceDetails(_invoices[index]),
                         customerName:
                             _invoices[index].customerName ?? 'عميل نقدي',
+                        showReturnButton: true, // ⬅️ تفعيل زر الإرجاع
+                        onReturn: _refreshData, // ⬅️ تحديث القائمة بعد الإرجاع
                       ),
                     );
                   }, childCount: _invoices.length + (_hasMore ? 1 : 0)),
