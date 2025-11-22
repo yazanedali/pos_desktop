@@ -55,21 +55,35 @@ class CustomerQueries {
     });
   }
 
-  Future<List<DebtorInfo>> getAllCustomersWithDebt() async {
+  Future<List<DebtorInfo>> getAllCustomersWithDebt({
+    String searchTerm = '',
+  }) async {
     final db = await _dbHelper.database;
 
-    //   ***** الاستعلام الآن أبسط وأكثر دقة *****
+    // بناء شرط البحث
+    String whereClause = '1=1'; // شرط أساسي دائماً صحيح
+    List<dynamic> whereArgs = [];
+
+    if (searchTerm.isNotEmpty) {
+      whereClause = '(c.name LIKE ? OR c.phone LIKE ?)';
+      whereArgs.addAll(['%$searchTerm%', '%$searchTerm%']);
+    }
+
+    //   ***** الاستعلام الآن أبسط وأكثر دقة مع دعم البحث *****
     final List<Map<String, dynamic>> maps = await db.rawQuery('''
-      SELECT
-        c.id as customerId,
-        c.name as customerName,
-        -- فقط اجمع المبالغ المتبقية من كل الفواتير (بما في ذلك فاتورة الدين الافتتاحي)
-        COALESCE(SUM(si.remaining_amount), 0) as totalDebt
-      FROM customers c
-      LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.remaining_amount > 0
-      GROUP BY c.id, c.name
-      ORDER BY totalDebt DESC, c.name ASC
-    ''');
+    SELECT
+      c.id as customerId,
+      c.name as customerName,
+      c.phone as phone,
+      c.address as address,
+      -- فقط اجمع المبالغ المتبقية من كل الفواتير (بما في ذلك فاتورة الدين الافتتاحي)
+      COALESCE(SUM(si.remaining_amount), 0) as totalDebt
+    FROM customers c
+    LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.remaining_amount > 0
+    WHERE $whereClause
+    GROUP BY c.id, c.name, c.phone, c.address
+    ORDER BY totalDebt DESC, c.name ASC
+  ''', whereArgs);
 
     return List.generate(maps.length, (i) {
       return DebtorInfo.fromMap(maps[i]);

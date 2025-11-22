@@ -16,6 +16,9 @@ class DebtorsPage extends StatefulWidget {
 class _DebtorsPageState extends State<DebtorsPage> {
   final CustomerQueries _customerQueries = CustomerQueries();
   late Future<List<DebtorInfo>> _debtorsFuture;
+  final TextEditingController _searchController =
+      TextEditingController(); // أضف هذا
+  String _searchTerm = ''; // أضف هذا
 
   @override
   void initState() {
@@ -26,8 +29,27 @@ class _DebtorsPageState extends State<DebtorsPage> {
   // دالة منفصلة لتحميل البيانات يمكن استدعاؤها من عدة أماكن
   void _loadDebtorsData() {
     setState(() {
-      _debtorsFuture = _customerQueries.getAllCustomersWithDebt();
+      _debtorsFuture = _customerQueries.getAllCustomersWithDebt(
+        searchTerm: _searchTerm,
+      );
     });
+  }
+
+  // دالة للبحث عن العملاء
+  void _searchCustomers(String searchTerm) {
+    setState(() {
+      _searchTerm = searchTerm;
+    });
+    _loadDebtorsData();
+  }
+
+  // دالة لمسح البحث
+  void _clearSearch() {
+    setState(() {
+      _searchController.clear();
+      _searchTerm = '';
+    });
+    _loadDebtorsData();
   }
 
   // دالة للتحديث اليدوي (يمكن استدعاؤها من زر تحديث إذا أردت)
@@ -297,46 +319,71 @@ class _DebtorsPageState extends State<DebtorsPage> {
           topRight: Radius.circular(12),
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(Icons.people_alt_outlined, color: Colors.blue[800]),
-              const SizedBox(width: 8),
-              const Text(
-                "إدارة العملاء والديون",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
-                ),
+              Row(
+                children: [
+                  Icon(Icons.people_alt_outlined, color: Colors.blue[800]),
+                  const SizedBox(width: 8),
+                  const Text(
+                    "إدارة العملاء والديون",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  // زر التحديث
+                  IconButton(
+                    onPressed: _refreshDebtorsList,
+                    icon: const Icon(Icons.refresh),
+                    tooltip: "تحديث البيانات",
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.blue.shade100,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // زر إضافة عميل
+                  ElevatedButton.icon(
+                    onPressed: _showAddCustomerDialog,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text("إضافة عميل"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          Row(
-            children: [
-              // زر التحديث
-              IconButton(
-                onPressed: _refreshDebtorsList,
-                icon: const Icon(Icons.refresh),
-                tooltip: "تحديث البيانات",
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.blue.shade100,
-                ),
+          const SizedBox(height: 12),
+          // حقل البحث
+          TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'ابحث عن عميل بالاسم أو رقم الهاتف...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon:
+                  _searchController.text.isNotEmpty
+                      ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: _clearSearch,
+                      )
+                      : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 8),
-              // زر إضافة عميل
-              ElevatedButton.icon(
-                onPressed: _showAddCustomerDialog,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text("إضافة عميل"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            onChanged: _searchCustomers,
           ),
         ],
       ),

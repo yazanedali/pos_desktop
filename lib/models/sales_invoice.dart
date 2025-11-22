@@ -91,6 +91,8 @@ class SaleInvoiceItem {
   final double price;
   final double quantity; // <-- غيرت لـ double عشان يتوافق مع DB
   final double total;
+  final double unitQuantity;
+  final String unitName;
 
   SaleInvoiceItem({
     this.id,
@@ -100,6 +102,8 @@ class SaleInvoiceItem {
     required this.price,
     required this.quantity,
     required this.total,
+    this.unitQuantity = 1.0,
+    required this.unitName, // <-- required
   });
 
   factory SaleInvoiceItem.fromMap(Map<String, dynamic> map) {
@@ -111,6 +115,9 @@ class SaleInvoiceItem {
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
       quantity: (map['quantity'] as num?)?.toDouble() ?? 0.0, // <-- double
       total: (map['total'] as num?)?.toDouble() ?? 0.0,
+      unitQuantity:
+          (map['unit_quantity'] as num?)?.toDouble() ?? 1.0, // <-- أضف هذا
+      unitName: map['unit_name'] ?? 'حبة', // <-- أضف هذا
     );
   }
 
@@ -123,6 +130,8 @@ class SaleInvoiceItem {
       'price': price,
       'quantity': quantity,
       'total': total,
+      'unit_quantity': unitQuantity,
+      'unit_name': unitName, // <-- أضف هذا
     };
   }
 }

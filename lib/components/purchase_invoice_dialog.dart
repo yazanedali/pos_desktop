@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import '../database/product_queries.dart';
 import '../models/category.dart';
 import '../models/purchase_invoice.dart';
+import '../models/product.dart';
 import '../widgets/top_alert.dart';
 
 class PurchaseInvoiceDialog extends StatefulWidget {
@@ -86,15 +87,10 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   }
 
   void _disposeItemControllers() {
-    // ignore: curly_braces_in_flow_control_structures
     for (var c in _productNameControllers) c.dispose();
-    // ignore: curly_braces_in_flow_control_structures
     for (var c in _barcodeControllers) c.dispose();
-    // ignore: curly_braces_in_flow_control_structures
     for (var c in _quantityControllers) c.dispose();
-    // ignore: curly_braces_in_flow_control_structures
     for (var c in _purchasePriceControllers) c.dispose();
-    // ignore: curly_braces_in_flow_control_structures
     for (var c in _salePriceControllers) c.dispose();
     _productNameControllers.clear();
     _barcodeControllers.clear();
@@ -119,7 +115,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         PurchaseInvoiceItem(
           productName: '',
           barcode: '',
-          quantity: 0.0, // تأكد أنه double
+          quantity: 0.0,
           purchasePrice: 0.0,
           salePrice: 0.0,
           category: '',
@@ -170,30 +166,60 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     });
   }
 
+  // البحث عن المنتج بواسطة الباركود
   Future<void> _findProductByBarcode(String barcode, int index) async {
     if (barcode.isEmpty) return;
     final product = await ProductQueries().getProductByBarcode(barcode);
     if (product != null) {
-      final category = widget.categories.firstWhere(
-        (c) => c.id == product.categoryId,
-        orElse: () => Category(id: 0, name: 'غير معروف', color: '#000000'),
-      );
-      setState(() {
-        _invoiceItems[index] = _invoiceItems[index].copyWith(
-          productName: product.name,
-          barcode: product.barcode,
-          salePrice: product.price,
-          category: category.name,
-        );
-        _productNameControllers[index].text = product.name;
-        _salePriceControllers[index].text = product.price.toString();
-      });
+      _fillProductData(product, index);
     } else {
       TopAlert.showWarning(
         context: context,
         message: 'لم يتم العثور على منتج بهذا الباركود',
       );
     }
+  }
+
+  // البحث عن المنتج بواسطة الاسم
+  Future<void> _findProductByName(String productName, int index) async {
+    if (productName.isEmpty) return;
+
+    try {
+      final product = await ProductQueries().getProductByName(productName);
+      if (product != null) {
+        _fillProductData(product, index);
+      } else {
+        TopAlert.showWarning(
+          context: context,
+          message: 'لم يتم العثور على منتج بهذا الاسم',
+        );
+      }
+    } catch (e) {
+      TopAlert.showError(
+        context: context,
+        message: 'خطأ في البحث عن المنتج: $e',
+      );
+    }
+  }
+
+  // تعبئة بيانات المنتج في الحقول
+  void _fillProductData(Product product, int index) {
+    final category = widget.categories.firstWhere(
+      (c) => c.id == product.categoryId,
+      orElse: () => Category(id: 0, name: 'غير معروف', color: '#000000'),
+    );
+
+    setState(() {
+      _invoiceItems[index] = _invoiceItems[index].copyWith(
+        productName: product.name,
+        barcode: product.barcode ?? '',
+        salePrice: product.price,
+        category: category.name,
+      );
+      _productNameControllers[index].text = product.name;
+      _barcodeControllers[index].text = product.barcode ?? '';
+      _salePriceControllers[index].text = product.price.toString();
+    });
   }
 
   double _calculateTotal() =>
@@ -223,7 +249,6 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       return;
     }
 
-    // إذا كانت جميع الشروط متوفرة، إنشاء الفاتورة
     final invoice = PurchaseInvoice(
       id: widget.invoiceToEdit?.id,
       invoiceNumber: _generatedInvoiceNumber,
@@ -411,11 +436,12 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (v) => _updateInvoiceItem(index, 'productName', v),
+                  onFieldSubmitted: (v) => _findProductByName(v, index),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: TextFormField(
                   controller: _barcodeControllers[index],
                   decoration: const InputDecoration(
@@ -509,7 +535,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
               const SizedBox(width: 8),
               IconButton(
                 onPressed: () => _removeInvoiceItem(index),
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outlined),
                 color: Colors.red,
               ),
             ],

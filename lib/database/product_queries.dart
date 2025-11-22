@@ -282,4 +282,17 @@ class ProductQueries {
     final db = await dbHelper.database;
     return await db.query('categories', orderBy: 'name');
   }
+
+  Future<Product?> getProductByName(String name) async {
+    final db = await DatabaseHelper().database;
+    final maps = await db.query(
+      'products',
+      where: 'name = ? AND is_active = 1',
+      whereArgs: [name],
+    );
+    if (maps.isNotEmpty) {
+      return Product.fromMap(maps.first);
+    }
+    return null;
+  }
 }

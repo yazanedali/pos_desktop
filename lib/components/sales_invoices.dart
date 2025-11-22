@@ -66,7 +66,7 @@ class _SalesInvoicesState extends State<SalesInvoices> {
     }
 
     try {
-      // 2. استخدام الدالة الموحدة لجلب البيانات، وتمرير قيمة البحث
+      // استخدام الدالة الموحدة لجلب البيانات، وتمرير قيمة البحث
       final invoices = await _invoiceService.getSalesInvoicesPaginated(
         page: _currentPage,
         startDate:
@@ -75,6 +75,10 @@ class _SalesInvoicesState extends State<SalesInvoices> {
                 : null,
         endDate:
             _dateToController.text.isNotEmpty ? _dateToController.text : null,
+        searchTerm:
+            _searchController.text.isNotEmpty
+                ? _searchController.text
+                : null, // <-- أضف هذا
       );
 
       final totalCount = await _invoiceService.getInvoicesCount(
@@ -84,6 +88,10 @@ class _SalesInvoicesState extends State<SalesInvoices> {
                 : null,
         endDate:
             _dateToController.text.isNotEmpty ? _dateToController.text : null,
+        searchTerm:
+            _searchController.text.isNotEmpty
+                ? _searchController.text
+                : null, // <-- أضف هذا
       );
 
       setState(() {
@@ -146,6 +154,7 @@ class _SalesInvoicesState extends State<SalesInvoices> {
             Navigator.of(dialogContext).pop();
             _printInvoice(invoice);
           },
+          coustomerName: invoice.customerName ?? 'عميل نقدي',
         );
       },
     );
@@ -334,6 +343,8 @@ class _SalesInvoicesState extends State<SalesInvoices> {
                       child: InvoiceCard(
                         invoice: _invoices[index],
                         onTap: () => _showInvoiceDetails(_invoices[index]),
+                        customerName:
+                            _invoices[index].customerName ?? 'عميل نقدي',
                       ),
                     );
                   }, childCount: _invoices.length + (_hasMore ? 1 : 0)),
@@ -350,7 +361,8 @@ class _SalesInvoicesState extends State<SalesInvoices> {
         TextField(
           controller: _searchController,
           decoration: InputDecoration(
-            hintText: 'ابحث برقم الفاتورة أو اسم الكاشير...',
+            hintText:
+                'ابحث برقم الفاتورة، اسم الكاشير، أو اسم العميل...', // <-- عدل النص
             prefixIcon: const Icon(Icons.search),
             suffixIcon: IconButton(
               icon: const Icon(Icons.clear),

@@ -71,32 +71,65 @@ class PurchaseQueries {
     return result.first['count'] as int? ?? 0;
   }
 
-  // باقي الدوال تبقى كما هي...
+  // دالة مساعدة لتحديث مخزون المنتج - تستخدم txn داخل transaction
+  Future<void> _updateProductStock({
+    required Transaction txn,
+    required String? barcode,
+    required String productName,
+    required double quantity,
+  }) async {
+    // تحديث المخزون بناءً على الباركود إذا كان موجوداً
+    if (barcode != null && barcode.isNotEmpty) {
+      final updatedRows = await txn.rawUpdate(
+        'UPDATE products SET stock = stock + ? WHERE barcode = ?',
+        [quantity, barcode],
+      );
+
+      if (updatedRows > 0) {
+        return;
+      }
+    }
+
+    // إذا لم يتم العثور على المنتج بالباركود، نبحث بالاسم
+    final updatedRows = await txn.rawUpdate(
+      'UPDATE products SET stock = stock + ? WHERE name = ?',
+      [quantity, productName],
+    );
+
+    if (updatedRows > 0) {
+    } else {
+      print('⚠️ تحذير: لم يتم العثور على المنتج "$productName" لتحديث المخزون');
+    }
+  }
+
   Future<PurchaseInvoice> insertPurchaseInvoice(PurchaseInvoice invoice) async {
     final db = await dbHelper.database;
+
     await db.transaction((txn) async {
+      // إدخال الفاتورة الرئيسية
       final invoiceId = await txn.insert(
         'purchase_invoices',
         invoice.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
+      // إدخال العناصر وتحديث المخزون
       for (final item in invoice.items) {
         await txn.insert('purchase_invoice_items', {
           ...item.toMap(),
           'invoice_id': invoiceId,
         });
 
-        await txn.rawUpdate(
-          '''
-          UPDATE products 
-          SET stock = stock + ? 
-          WHERE barcode = ?
-        ''',
-          [item.quantity, item.barcode],
+        // تحديث المخزون باستخدام الدالة المساعدة - نمرر txn
+        await _updateProductStock(
+          txn: txn,
+          barcode: item.barcode,
+          productName: item.productName,
+          quantity: item.quantity,
         );
       }
     });
+
     return invoice;
   }
 
@@ -104,6 +137,7 @@ class PurchaseQueries {
     final db = await dbHelper.database;
 
     await db.transaction((txn) async {
+      // جلب العناصر القديمة
       final oldItemsMaps = await txn.query(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
@@ -112,17 +146,17 @@ class PurchaseQueries {
       final oldItems =
           oldItemsMaps.map((map) => PurchaseInvoiceItem.fromMap(map)).toList();
 
+      // تراجع عن تحديث المخزون للعناصر القديمة
       for (final oldItem in oldItems) {
-        await txn.rawUpdate(
-          '''
-          UPDATE products 
-          SET stock = stock - ? 
-          WHERE barcode = ?
-        ''',
-          [oldItem.quantity, oldItem.barcode],
+        await _updateProductStock(
+          txn: txn,
+          barcode: oldItem.barcode,
+          productName: oldItem.productName,
+          quantity: -oldItem.quantity, // ناقص لأننا نرجع الكمية
         );
       }
 
+      // تحديث الفاتورة الرئيسية
       await txn.update(
         'purchase_invoices',
         invoice.toMap(),
@@ -130,25 +164,26 @@ class PurchaseQueries {
         whereArgs: [invoice.id],
       );
 
+      // حذف العناصر القديمة
       await txn.delete(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
         whereArgs: [invoice.id],
       );
 
+      // إضافة العناصر الجديدة وتحديث المخزون
       for (final newItem in invoice.items) {
         await txn.insert('purchase_invoice_items', {
           ...newItem.toMap(),
           'invoice_id': invoice.id,
         });
 
-        await txn.rawUpdate(
-          '''
-          UPDATE products 
-          SET stock = stock + ? 
-          WHERE barcode = ?
-        ''',
-          [newItem.quantity, newItem.barcode],
+        // تحديث المخزون للعناصر الجديدة
+        await _updateProductStock(
+          txn: txn,
+          barcode: newItem.barcode,
+          productName: newItem.productName,
+          quantity: newItem.quantity,
         );
       }
     });
@@ -176,6 +211,29 @@ class PurchaseQueries {
 
   Future<void> deletePurchaseInvoice(int id) async {
     final db = await dbHelper.database;
-    await db.delete('purchase_invoices', where: 'id = ?', whereArgs: [id]);
+
+    await db.transaction((txn) async {
+      // جلب العناصر أولاً لتراجع تحديث المخزون
+      final itemsMaps = await txn.query(
+        'purchase_invoice_items',
+        where: 'invoice_id = ?',
+        whereArgs: [id],
+      );
+      final items =
+          itemsMaps.map((map) => PurchaseInvoiceItem.fromMap(map)).toList();
+
+      // تراجع تحديث المخزون
+      for (final item in items) {
+        await _updateProductStock(
+          txn: txn,
+          barcode: item.barcode,
+          productName: item.productName,
+          quantity: -item.quantity, // ناقص لأننا نحذف الفاتورة
+        );
+      }
+
+      // حذف الفاتورة والعناصر
+      await txn.delete('purchase_invoices', where: 'id = ?', whereArgs: [id]);
+    });
   }
 }

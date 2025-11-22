@@ -65,7 +65,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
+        name TEXT UNIQUE NOT NULL,
         price REAL NOT NULL,
         stock REAL DEFAULT 0,
         barcode TEXT UNIQUE,
@@ -102,17 +102,19 @@ class DatabaseHelper {
 
     // جدول عناصر فواتير المبيعات
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS sales_invoice_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        invoice_id INTEGER NOT NULL,
-        product_id INTEGER,
-        product_name TEXT NOT NULL,
-        price REAL NOT NULL,
-        quantity REAL NOT NULL,
-        total REAL NOT NULL,
-        FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
-      )
-    ''');
+    CREATE TABLE IF NOT EXISTS sales_invoice_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      product_id INTEGER,
+      product_name TEXT NOT NULL,
+      price REAL NOT NULL,
+      quantity REAL NOT NULL,
+      total REAL NOT NULL,
+      unit_quantity REAL NOT NULL DEFAULT 1.0, -- ⬅️ أضف هذا
+      unit_name TEXT NOT NULL DEFAULT 'حبة',  -- ⬅️ أضف هذا
+      FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
+    )
+  ''');
 
     // جدول فواتير الشراء
     await db.execute('''

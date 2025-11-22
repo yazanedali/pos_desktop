@@ -4,8 +4,14 @@ import '../../models/sales_invoice.dart';
 class InvoiceCard extends StatelessWidget {
   final SaleInvoice invoice;
   final VoidCallback onTap;
+  final String customerName;
 
-  const InvoiceCard({super.key, required this.invoice, required this.onTap});
+  const InvoiceCard({
+    super.key,
+    required this.invoice,
+    required this.onTap,
+    required this.customerName,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +126,16 @@ class InvoiceCard extends StatelessWidget {
                         const SizedBox(width: 4),
                         Text(
                           invoice.cashier,
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        const Icon(Icons.person, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(
+                          customerName,
                           style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 12,

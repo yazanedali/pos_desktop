@@ -7,7 +7,6 @@ import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/models/product_package.dart';
 import 'package:pos_desktop/models/sales_invoice.dart';
 import 'package:pos_desktop/services/sales_invoice_service.dart';
-import 'package:pos_desktop/services/sales_service.dart';
 import './sales/barcode_reader.dart';
 import './sales/products_grid.dart';
 import './sales/shopping_cart.dart';
@@ -27,7 +26,6 @@ class SalesInterface extends StatefulWidget {
 class _SalesInterfaceState extends State<SalesInterface> {
   final ProductQueries _productQueries = ProductQueries();
   final CategoryQueries _categoryQueries = CategoryQueries();
-  final SalesService _salesService = SalesService();
   final CustomerQueries _customerQueries = CustomerQueries();
   final SalesInvoiceService _invoiceService =
       SalesInvoiceService(); // <-- أضف هذا
@@ -258,11 +256,20 @@ class _SalesInterfaceState extends State<SalesInterface> {
         final product = _products.firstWhere((p) => p.id == item.id);
 
         double newQuantity;
+
         if (resetQuantity) {
+          // إذا بدنا نعيد الكمية لـ 1
           newQuantity = 1.0;
         } else {
+          // نحافظ على نفس عدد القطع الكلي
           final currentTotalPieces = item.quantity * item.unitQuantity;
           newQuantity = currentTotalPieces / newPackage.containedQuantity;
+
+          // إذا الناتج بيكون كسر، نعمله تقريب
+          if (newQuantity != newQuantity.roundToDouble()) {
+            newQuantity =
+                newQuantity.ceilToDouble(); // أو roundToDouble() حسب ما تفضل
+          }
         }
 
         final totalPieces = newQuantity * newPackage.containedQuantity;
@@ -276,10 +283,11 @@ class _SalesInterfaceState extends State<SalesInterface> {
           return;
         }
 
+        // التحديث
         item.name = product.name;
         item.unitName = newPackage.name;
         item.price = newPackage.price;
-        item.unitQuantity = newPackage.containedQuantity;
+        item.unitQuantity = newPackage.containedQuantity; // ⬅️ هذا السليم
         item.quantity = newQuantity;
       }
     });
@@ -396,12 +404,14 @@ class _SalesInterfaceState extends State<SalesInterface> {
       final List<SaleInvoiceItem> invoiceItems =
           _cartItems.map((cartItem) {
             return SaleInvoiceItem(
-              invoiceId: 0, // سيتم تعبئته لاحقاً
+              invoiceId: 0,
               productId: cartItem.id,
               productName: cartItem.name,
               price: cartItem.price,
               quantity: cartItem.quantity,
               total: cartItem.price * cartItem.quantity,
+              unitQuantity: cartItem.unitQuantity,
+              unitName: cartItem.unitName, // ⬅️ اسم الحزمة من السلة
             );
           }).toList();
 

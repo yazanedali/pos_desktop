@@ -4,7 +4,7 @@ import '../models/sales_invoice.dart';
 
 class SalesInvoiceService {
   final DatabaseHelper _dbHelper = DatabaseHelper();
-  static const int pageSize = 15;
+  static const int pageSize = 3;
 
   // الحصول على جميع فواتير المبيعات
   Future<List<SaleInvoice>> getAllSalesInvoices() async {
@@ -110,8 +110,14 @@ class SalesInvoiceService {
   }) async {
     final db = await _dbHelper.database;
     try {
-      String whereClause = '(invoice_number LIKE ? OR cashier LIKE ?)';
-      List<dynamic> whereArgs = ['%$searchTerm%', '%$searchTerm%'];
+      // تحديث شرط البحث ليشمل اسم العميل
+      String whereClause =
+          '(invoice_number LIKE ? OR cashier LIKE ? OR customer_name LIKE ?)';
+      List<dynamic> whereArgs = [
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+      ];
 
       if (startDate != null && endDate != null) {
         whereClause += ' AND date BETWEEN ? AND ?';
@@ -125,11 +131,11 @@ class SalesInvoiceService {
       }
 
       final invoices = await db.rawQuery('''
-        SELECT * FROM sales_invoices 
-        WHERE $whereClause
-        ORDER BY created_at DESC
-        LIMIT 100
-      ''', whereArgs);
+      SELECT * FROM sales_invoices 
+      WHERE $whereClause
+      ORDER BY created_at DESC
+      LIMIT 100
+    ''', whereArgs);
 
       final List<SaleInvoice> result = [];
 
@@ -238,6 +244,7 @@ class SalesInvoiceService {
     int pageSize = pageSize,
     String? startDate,
     String? endDate,
+    String? searchTerm,
   }) async {
     final db = await _dbHelper.database;
 
@@ -245,25 +252,35 @@ class SalesInvoiceService {
       String whereClause = '';
       List<dynamic> whereArgs = [];
 
+      // إضافة شرط البحث إذا كان موجود
+      if (searchTerm != null && searchTerm.isNotEmpty) {
+        whereClause =
+            '(invoice_number LIKE ? OR cashier LIKE ? OR customer_name LIKE ?)';
+        whereArgs.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
+      }
+
       if (startDate != null && endDate != null) {
-        whereClause = 'date BETWEEN ? AND ?';
+        whereClause +=
+            whereClause.isNotEmpty
+                ? ' AND date BETWEEN ? AND ?'
+                : 'date BETWEEN ? AND ?';
         whereArgs.addAll([startDate, endDate]);
       } else if (startDate != null) {
-        whereClause = 'date >= ?';
+        whereClause += whereClause.isNotEmpty ? ' AND date >= ?' : 'date >= ?';
         whereArgs.add(startDate);
       } else if (endDate != null) {
-        whereClause = 'date <= ?';
+        whereClause += whereClause.isNotEmpty ? ' AND date <= ?' : 'date <= ?';
         whereArgs.add(endDate);
       }
 
       final offset = (page - 1) * pageSize;
 
       final query = '''
-        SELECT * FROM sales_invoices 
-        ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
-        ORDER BY created_at DESC 
-        LIMIT ? OFFSET ?
-      ''';
+      SELECT * FROM sales_invoices 
+      ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
+      ORDER BY created_at DESC 
+      LIMIT ? OFFSET ?
+    ''';
 
       whereArgs.addAll([pageSize, offset]);
 
@@ -303,7 +320,6 @@ class SalesInvoiceService {
     }
   }
 
-  // دالة لإنشاء فاتورة جديدة
   Future<SaleInvoice> createInvoice({
     required String invoiceNumber,
     required String date,
@@ -319,12 +335,6 @@ class SalesInvoiceService {
   }) async {
     final db = await _dbHelper.database;
 
-    // تحقق من أن القيم متسقة
-    assert(
-      (paidAmount + remainingAmount - total).abs() < 0.01,
-      'القيم غير متسقة: paidAmount + remainingAmount != total',
-    );
-
     // تحديد نوع الدفع وحالة السداد
     final String paymentType = (remainingAmount > 0) ? 'آجل' : 'نقدي';
     final String paymentStatus = _determinePaymentStatus(
@@ -333,13 +343,23 @@ class SalesInvoiceService {
       remainingAmount,
     );
 
-    print('🧾 إنشاء فاتورة جديدة:');
-    print('   - رقم الفاتورة: $invoiceNumber');
-    print('   - الإجمالي: $total');
-    print('   - المدفوع: $paidAmount');
-    print('   - المتبقي: $remainingAmount');
-    print('   - نوع الدفع المحدد: $paymentType');
-    print('   - حالة السداد المحددة: $paymentStatus');
+    String? finalCustomerName = customerName;
+
+    // إذا كان في customerId، جلب اسم العميل من الداتابيز
+    if (customerId != null && customerId > 0 && customerName == null) {
+      try {
+        final customer = await db.query(
+          'customers',
+          where: 'id = ?',
+          whereArgs: [customerId],
+        );
+        if (customer.isNotEmpty) {
+          finalCustomerName = customer.first['name'] as String?;
+        }
+      } catch (e) {
+        print('❌ خطأ في جلب اسم العميل: $e');
+      }
+    }
 
     await db.transaction((txn) async {
       // إدخال الفاتورة الرئيسية
@@ -352,7 +372,7 @@ class SalesInvoiceService {
         'remaining_amount': remainingAmount,
         'cashier': cashier,
         'customer_id': customerId,
-        'customer_name': customerName,
+        'customer_name': finalCustomerName,
         'payment_method': paymentMethod,
         'payment_type': paymentType,
         'payment_status': paymentStatus,
@@ -360,14 +380,14 @@ class SalesInvoiceService {
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      print('💾 حفظ بيانات الفاتورة في DB:');
-      print('   - payment_type: ${invoiceData['payment_type']}');
-      print('   - payment_status: ${invoiceData['payment_status']}');
+      // نظف البيانات - إذا customer_name بيكون null، امسحه من البيانات
+      invoiceData.removeWhere((key, value) => value == null);
 
       final invoiceId = await txn.insert('sales_invoices', invoiceData);
 
-      // إدخال عناصر الفاتورة
+      // إدخال عناصر الفاتورة وتحديث المخزون
       for (final item in items) {
+        // 1. إدخال عنصر الفاتورة مع unit_quantity و unit_name
         await txn.insert('sales_invoice_items', {
           'invoice_id': invoiceId,
           'product_id': item.productId,
@@ -375,11 +395,29 @@ class SalesInvoiceService {
           'price': item.price,
           'quantity': item.quantity,
           'total': item.total,
+          'unit_quantity': item.unitQuantity, // ⬅️ عدد الحبات في الوحدة
+          'unit_name': item.unitName, // ⬅️ اسم الحزمة (كرتونة، علبة، إلخ)
         });
+
+        // 2. تحديث المخزون
+        final totalQuantity = item.quantity * item.unitQuantity;
+        final result = await txn.rawUpdate(
+          '''
+    UPDATE products 
+    SET stock = stock - ?, 
+        updated_at = CURRENT_TIMESTAMP 
+    WHERE id = ? AND stock >= ?
+  ''',
+          [totalQuantity, item.productId, totalQuantity],
+        );
+
+        if (result == 0) {
+          throw Exception('المخزون غير كافي للمنتج ${item.productName}');
+        }
       }
     });
 
-    // الحصول على الفاتورة المضافة والتحقق من القيم
+    // الحصول على الفاتورة المضافة
     final results = await db.query(
       'sales_invoices',
       where: 'invoice_number = ?',
@@ -391,12 +429,6 @@ class SalesInvoiceService {
     }
 
     final savedInvoice = results.first;
-    print('✅ الفاتورة محفوظة في DB:');
-    print('   - payment_type: ${savedInvoice['payment_type']}');
-    print('   - payment_status: ${savedInvoice['payment_status']}');
-    print('   - paid_amount: ${savedInvoice['paid_amount']}');
-    print('   - remaining_amount: ${savedInvoice['remaining_amount']}');
-
     final invoice = SaleInvoice.fromMap(savedInvoice);
     final itemsFromDb = await getInvoiceItems(invoice.id!);
 
@@ -425,11 +457,6 @@ class SalesInvoiceService {
     double total,
     double remainingAmount,
   ) {
-    print('🔍 تحديد حالة السداد:');
-    print('   - المدفوع: $paidAmount');
-    print('   - الإجمالي: $total');
-    print('   - المتبقي: $remainingAmount');
-
     String status;
 
     if (paidAmount == 0) {
@@ -440,33 +467,46 @@ class SalesInvoiceService {
       status = 'مدفوع';
     }
 
-    print('   - الحالة المحددة: $status');
     return status;
   }
 
   // الحصول على عدد الفواتير الكلي للفلترة
-  Future<int> getInvoicesCount({String? startDate, String? endDate}) async {
+  Future<int> getInvoicesCount({
+    String? startDate,
+    String? endDate,
+    String? searchTerm, // <-- أضف هذا الباراميتر
+  }) async {
     final db = await _dbHelper.database;
 
     try {
       String whereClause = '';
       List<dynamic> whereArgs = [];
 
+      // إضافة شرط البحث إذا كان موجود
+      if (searchTerm != null && searchTerm.isNotEmpty) {
+        whereClause =
+            '(invoice_number LIKE ? OR cashier LIKE ? OR customer_name LIKE ?)';
+        whereArgs.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
+      }
+
       if (startDate != null && endDate != null) {
-        whereClause = 'date BETWEEN ? AND ?';
+        whereClause +=
+            whereClause.isNotEmpty
+                ? ' AND date BETWEEN ? AND ?'
+                : 'date BETWEEN ? AND ?';
         whereArgs.addAll([startDate, endDate]);
       } else if (startDate != null) {
-        whereClause = 'date >= ?';
+        whereClause += whereClause.isNotEmpty ? ' AND date >= ?' : 'date >= ?';
         whereArgs.add(startDate);
       } else if (endDate != null) {
-        whereClause = 'date <= ?';
+        whereClause += whereClause.isNotEmpty ? ' AND date <= ?' : 'date <= ?';
         whereArgs.add(endDate);
       }
 
       final countResult = await db.rawQuery('''
-        SELECT COUNT(*) as count FROM sales_invoices 
-        ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
-      ''', whereArgs);
+      SELECT COUNT(*) as count FROM sales_invoices 
+      ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
+    ''', whereArgs);
 
       return countResult.first['count'] as int? ?? 0;
     } catch (e) {
@@ -549,15 +589,29 @@ class SalesInvoiceService {
         where: 'id = ?',
         whereArgs: [invoiceId],
       );
-
-      print('🔄 تم تحديث فاتورة $invoiceId:');
-      print('   - الحالة: $newPaymentStatus');
-      print('   - النوع: $newPaymentType');
-      print('   - المدفوع: $paidAmount');
-      print('   - المتبقي: $remainingAmount');
     } catch (e) {
-      print('❌ خطأ في تحديث حالة الفاتورة: $e');
       throw Exception('فشل في تحديث حالة الفاتورة: $e');
     }
+  }
+
+  Future<String> getCustomerNameById(int? customerId) {
+    if (customerId == null) return Future.value('عميل نقدي');
+
+    return _dbHelper.database.then((db) async {
+      try {
+        final customer = await db.query(
+          'customers',
+          where: 'id = ?',
+          whereArgs: [customerId],
+        );
+        if (customer.isNotEmpty) {
+          return customer.first['name'] as String;
+        } else {
+          return 'عميل نقدي';
+        }
+      } catch (e) {
+        return 'عميل نقدي';
+      }
+    });
   }
 }
