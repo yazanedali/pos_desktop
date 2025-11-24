@@ -17,65 +17,65 @@ class CustomerDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Row(
-        children: const [
-          Icon(Icons.person_outline),
-          SizedBox(width: 8),
-          Text("تفاصيل العميل"),
-        ],
-      ),
-      content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.35,
-        child: SingleChildScrollView(
-          child: ListBody(
-            children: <Widget>[
-              _buildDetailRow(
-                Icons.badge_outlined,
-                'الاسم:',
-                customer.name,
-                isTitle: true,
-              ),
-              _buildDetailRow(
-                Icons.phone_outlined,
-                'الهاتف:',
-                customer.phone ?? 'لا يوجد',
-              ),
-              _buildDetailRow(
-                Icons.location_on_outlined,
-                'العنوان:',
-                customer.address ?? 'لا يوجد',
-              ),
-              const Divider(height: 24),
-              _buildDetailRow(
-                Icons.account_balance_wallet_outlined,
-                'إجمالي الدين الحالي:', //   <-- تم تغيير النص للتوضيح
-                '${debtorInfo.totalDebt.toStringAsFixed(2)} شيكل',
-                color:
-                    debtorInfo.totalDebt > 0
-                        ? Colors.red.shade700
-                        : Colors.green,
-                isTitle: true, //   <-- تم تكبير الخط لتمييزه
-              ),
-
-              //   ***** تم حذف الأسطر التي تسببت في الخطأ من هنا *****
-              // _buildDetailRow('دين افتتاحي', ...),
-              // _buildDetailRow('ملاحظات', ...),
-            ],
+    return Directionality(
+      textDirection: TextDirection.rtl, // ← تحويل كامل الودجت إلى RTL
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: const [
+            Icon(Icons.person_outline),
+            SizedBox(width: 8),
+            Text("تفاصيل العميل"),
+          ],
+        ),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.35,
+          child: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                _buildDetailRow(
+                  Icons.badge_outlined,
+                  'الاسم:',
+                  customer.name,
+                  isTitle: true,
+                ),
+                _buildDetailRow(
+                  Icons.phone_outlined,
+                  'الهاتف:',
+                  customer.phone ?? 'لا يوجد',
+                ),
+                _buildDetailRow(
+                  Icons.location_on_outlined,
+                  'العنوان:',
+                  customer.address ?? 'لا يوجد',
+                ),
+                const Divider(height: 24),
+                _buildDetailRow(
+                  Icons.account_balance_wallet_outlined,
+                  'إجمالي الدين الحالي:',
+                  '${debtorInfo.totalDebt.toStringAsFixed(2)} شيكل',
+                  color:
+                      debtorInfo.totalDebt > 0
+                          ? Colors.red.shade700
+                          : Colors.green,
+                  isTitle: true,
+                ),
+              ],
+            ),
           ),
         ),
+        actionsAlignment: MainAxisAlignment.start, // أزرار تبدأ من اليمين
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('إغلاق'),
+          ),
+        ],
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('إغلاق'),
-        ),
-      ],
     );
   }
 
-  // ودجت مساعد لعرض كل صف من التفاصيل
+  // ودجت مساعد لصف التفاصيل
   Widget _buildDetailRow(
     IconData icon,
     String label,
@@ -91,7 +91,7 @@ class CustomerDialog extends StatelessWidget {
           Icon(icon, size: 18, color: Colors.grey[600]),
           const SizedBox(width: 12),
           SizedBox(
-            width: 100, // عرض ثابت للعنوان
+            width: 100,
             child: Text(
               label,
               style: const TextStyle(fontWeight: FontWeight.bold),

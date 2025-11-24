@@ -694,4 +694,57 @@ class SalesInvoiceService {
       throw Exception('فشل في إرجاع الفاتورة: $e');
     }
   }
+
+  // في sales_invoice_service.dart - أضف هذه الدالة
+  Future<List<SaleInvoice>> getCustomerStatement({
+    required int customerId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final db = await _dbHelper.database;
+
+    try {
+      final invoices = await db.rawQuery(
+        '''
+      SELECT * FROM sales_invoices 
+      WHERE customer_id = ? 
+        AND date BETWEEN ? AND ?
+      ORDER BY date DESC, time DESC
+    ''',
+        [customerId, startDate, endDate],
+      );
+
+      final List<SaleInvoice> result = [];
+
+      for (final invoiceMap in invoices) {
+        final invoice = SaleInvoice.fromMap(invoiceMap);
+        final items = await getInvoiceItems(invoice.id!);
+
+        result.add(
+          SaleInvoice(
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            date: invoice.date,
+            time: invoice.time,
+            total: invoice.total,
+            paidAmount: invoice.paidAmount,
+            remainingAmount: invoice.remainingAmount,
+            cashier: invoice.cashier,
+            customerName: invoice.customerName,
+            paymentMethod: invoice.paymentMethod,
+            paymentType: invoice.paymentType,
+            paymentStatus: invoice.paymentStatus,
+            originalTotal: invoice.originalTotal,
+            notes: invoice.notes,
+            createdAt: invoice.createdAt,
+            items: items,
+          ),
+        );
+      }
+
+      return result;
+    } catch (e) {
+      throw Exception('فشل في تحميل كشف حساب العميل: $e');
+    }
+  }
 }

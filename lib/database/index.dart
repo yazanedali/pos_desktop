@@ -5,5 +5,4 @@ export 'sales_queries.dart';
 export 'purchase_queries.dart';
 export '../models/category.dart';
 export '../models/product.dart';
-export '../models/sale_invoice.dart';
 export '../models/purchase_invoice.dart';

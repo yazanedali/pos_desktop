@@ -393,87 +393,128 @@ class _ProductSaleCardState extends State<ProductSaleCard> {
           children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
+              width: 120, // عرض مضغوط
+              height: 80, // ارتفاع مضغوط
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(8), // زوايا أصغر
                 border: Border.all(
                   color: _isHovering ? Colors.blue : Colors.grey.shade200,
-                  width: _isHovering ? 2 : 1,
+                  width: _isHovering ? 1.5 : 1,
                 ),
                 boxShadow:
                     _isHovering
                         ? [
                           BoxShadow(
                             color: Colors.blue.withOpacity(0.1),
-                            blurRadius: 10,
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
                         ]
                         : [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 5,
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
                           ),
                         ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.only(top: 12),
-                      color: Colors.grey.shade100,
-                      child: Icon(
-                        Icons.inventory_2_outlined,
-                        size: 40,
-                        color: Colors.grey.shade400,
+              child: Padding(
+                padding: const EdgeInsets.all(8.0), // padding أصغر
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // اسم المنتج
+                    Text(
+                      widget.product.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        height: 1.1,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+
+                    // السعر والمخزون في سطر واحد
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          widget.product.name,
+                          "${widget.product.price.toStringAsFixed(0)} ش",
                           style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "${widget.product.price.toStringAsFixed(2)} شيكل",
-                          style: const TextStyle(
-                            fontSize: 16,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             color: Colors.blue,
                           ),
                         ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color:
+                                widget.product.stock > 0
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.red.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(
+                              color:
+                                  widget.product.stock > 0
+                                      ? Colors.green.withOpacity(0.3)
+                                      : Colors.red.withOpacity(0.3),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.inventory_2,
+                                size: 10,
+                                color:
+                                    widget.product.stock > 0
+                                        ? Colors.green
+                                        : Colors.red,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                widget.product.stock.toStringAsFixed(0),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color:
+                                      widget.product.stock > 0
+                                          ? Colors.green
+                                          : Colors.red,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+
+            // شارة الفئة - مصغرة
             Positioned(
-              top: -10,
-              right: 12,
+              top: -6,
+              right: 8,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: categoryColor,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                   boxShadow: [
                     BoxShadow(
                       color: categoryColor.withOpacity(0.3),
-                      blurRadius: 5,
-                      offset: const Offset(0, 2),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
                     ),
                   ],
                 ),
@@ -482,7 +523,7 @@ class _ProductSaleCardState extends State<ProductSaleCard> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize: 11,
+                    fontSize: 8,
                   ),
                 ),
               ),
