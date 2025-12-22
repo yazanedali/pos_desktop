@@ -1,5 +1,6 @@
 // services/sales_invoice_service.dart
 import 'package:pos_desktop/database/database_helper.dart';
+import 'package:sqflite/sqflite.dart';
 import '../models/sales_invoice.dart';
 
 class SalesInvoiceService {
@@ -746,5 +747,483 @@ class SalesInvoiceService {
     } catch (e) {
       throw Exception('فشل في تحميل كشف حساب العميل: $e');
     }
+  }
+
+  // في sales_invoice_service.dart - أضف هذه الدوال
+
+  // إرجاع جزئي لمنتج معين
+  Future<bool> returnPartialItem({
+    required int invoiceId,
+    required int itemId,
+    required double returnedQuantity,
+  }) async {
+    final db = await _dbHelper.database;
+
+    try {
+      await db.transaction((txn) async {
+        // 1. جلب بيانات العنصر الحالي
+        final items = await txn.query(
+          'sales_invoice_items',
+          where: 'id = ? AND invoice_id = ?',
+          whereArgs: [itemId, invoiceId],
+        );
+
+        if (items.isEmpty) {
+          throw Exception('العنصر غير موجود في الفاتورة');
+        }
+
+        final item = items.first;
+        final currentQuantity = (item['quantity'] as num).toDouble();
+        final unitQuantity = (item['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+        final productId = item['product_id'] as int?;
+        final productName = item['product_name'] as String;
+
+        if (returnedQuantity > currentQuantity) {
+          throw Exception(
+            'الكمية المراد إرجاعها ($returnedQuantity) أكبر من الكمية المشتراة ($currentQuantity) للمنتج $productName',
+          );
+        }
+
+        if (returnedQuantity <= 0) {
+          throw Exception('الكمية المراد إرجاعها يجب أن تكون أكبر من الصفر');
+        }
+
+        // 2. تحديث كمية العنصر في الفاتورة
+        final newQuantity = currentQuantity - returnedQuantity;
+
+        if (newQuantity > 0) {
+          // تحديث الكمية إذا بقي جزء من المنتج
+          await txn.update(
+            'sales_invoice_items',
+            {
+              'quantity': newQuantity,
+              'total': (item['price'] as num).toDouble() * newQuantity,
+            },
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+        } else {
+          // حذف العنصر إذا تم إرجاعه بالكامل
+          await txn.delete(
+            'sales_invoice_items',
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+        }
+
+        // 3. إرجاع الكمية للمخزون
+        if (productId != null) {
+          final totalReturnedPieces = returnedQuantity * unitQuantity;
+          await txn.rawUpdate(
+            '''
+          UPDATE products 
+          SET stock = stock + ?, 
+              updated_at = CURRENT_TIMESTAMP 
+          WHERE id = ?
+          ''',
+            [totalReturnedPieces, productId],
+          );
+        }
+
+        // 4. تحديث إجمالي الفاتورة
+        await _recalculateInvoiceTotal(txn, invoiceId);
+      });
+
+      return true;
+    } catch (e) {
+      throw Exception('فشل في الإرجاع الجزئي: $e');
+    }
+  }
+
+  // تعديل الفاتورة (تغيير الكميات)
+  Future<bool> updateInvoice({
+    required int invoiceId,
+    required List<SaleInvoiceItem> updatedItems,
+  }) async {
+    final db = await _dbHelper.database;
+
+    try {
+      // التحقق من المخزون قبل بدء المعاملة
+      final originalItems = await db.query(
+        'sales_invoice_items',
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+      );
+
+      for (final updatedItem in updatedItems) {
+        final originalItem = originalItems.firstWhere(
+          (item) => item['id'] == updatedItem.id,
+          orElse: () => {},
+        );
+
+        if (originalItem.isNotEmpty && updatedItem.id != null) {
+          final originalQuantity = (originalItem['quantity'] as num).toDouble();
+          final originalUnitQuantity =
+              (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+          final originalTotalPieces = originalQuantity * originalUnitQuantity;
+
+          final newTotalPieces =
+              updatedItem.quantity * updatedItem.unitQuantity;
+          final difference = newTotalPieces - originalTotalPieces;
+
+          // إذا كانت هناك زيادة في الكمية، تحقق من المخزون
+          if (difference > 0) {
+            final productResult = await db.query(
+              'products',
+              where: 'id = ?',
+              whereArgs: [updatedItem.productId],
+            );
+
+            if (productResult.isNotEmpty) {
+              final currentStock =
+                  (productResult.first['stock'] as num).toDouble();
+              if (currentStock < difference) {
+                throw Exception(
+                  'المخزون غير كافي للمنتج ${updatedItem.productName}. المتاح: $currentStock, المطلوب: $difference',
+                );
+              }
+            }
+          }
+        }
+      }
+
+      await db.transaction((txn) async {
+        // 1. مقارنة التغييرات وتحديث المخزون
+        await _syncInventoryChanges(txn, originalItems, updatedItems);
+
+        // 2. تحديث العناصر في قاعدة البيانات
+        await _updateInvoiceItems(txn, invoiceId, updatedItems);
+
+        // 3. تحديث إجمالي الفاتورة
+        await _recalculateInvoiceTotal(txn, invoiceId);
+      });
+
+      return true;
+    } catch (e) {
+      throw Exception('فشل في تعديل الفاتورة: $e');
+    }
+  }
+
+  // الدوال المساعدة
+  Future<void> _recalculateInvoiceTotal(Transaction txn, int invoiceId) async {
+    // حساب الإجمالي الجديد من العناصر
+    final items = await txn.query(
+      'sales_invoice_items',
+      where: 'invoice_id = ?',
+      whereArgs: [invoiceId],
+    );
+
+    double newTotal = 0.0;
+    for (final item in items) {
+      newTotal += (item['total'] as num).toDouble();
+    }
+
+    // جلب بيانات الفاتورة الحالية
+    final invoice = await txn.query(
+      'sales_invoices',
+      where: 'id = ?',
+      whereArgs: [invoiceId],
+    );
+
+    if (invoice.isNotEmpty) {
+      final currentPaidAmount =
+          (invoice.first['paid_amount'] as num).toDouble();
+      final newRemainingAmount = newTotal - currentPaidAmount;
+
+      // تحديث الفاتورة بالمبالغ الجديدة
+      await txn.update(
+        'sales_invoices',
+        {
+          'total': newTotal,
+          'remaining_amount': newRemainingAmount,
+          'payment_status': _determinePaymentStatus(
+            currentPaidAmount,
+            newTotal,
+            newRemainingAmount,
+          ),
+        },
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+      );
+    }
+  }
+
+  Future<void> _syncInventoryChanges(
+    Transaction txn,
+    List<Map<String, dynamic>> originalItems,
+    List<SaleInvoiceItem> updatedItems,
+  ) async {
+    for (final updatedItem in updatedItems) {
+      // البحث عن العنصر الأصلي
+      final originalItem = originalItems.firstWhere(
+        (item) => item['id'] == updatedItem.id,
+        orElse: () => {},
+      );
+
+      if (originalItem.isNotEmpty && updatedItem.id != null) {
+        final originalQuantity = (originalItem['quantity'] as num).toDouble();
+        final originalUnitQuantity =
+            (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+        final originalTotalPieces = originalQuantity * originalUnitQuantity;
+
+        final newTotalPieces = updatedItem.quantity * updatedItem.unitQuantity;
+        final difference = newTotalPieces - originalTotalPieces;
+
+        if (difference != 0) {
+          // التحقق من المخزون المتاح أولاً
+          final productResult = await txn.query(
+            'products',
+            where: 'id = ?',
+            whereArgs: [updatedItem.productId],
+          );
+
+          if (productResult.isNotEmpty) {
+            final currentStock =
+                (productResult.first['stock'] as num).toDouble();
+
+            // إذا كان الفرق سالب (تخفيض الكمية) فلا نحتاج للتحقق من المخزون
+            // إذا كان الفرق موجب (زيادة الكمية) نتحقق من المخزون
+            if (difference > 0 && currentStock < difference) {
+              throw Exception(
+                'المخزون غير كافي للمنتج ${updatedItem.productName}. المتاح: $currentStock, المطلوب: $difference',
+              );
+            }
+
+            // تحديث المخزون
+            await txn.rawUpdate(
+              '''
+            UPDATE products 
+            SET stock = stock - ?, 
+                updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+            ''',
+              [difference, updatedItem.productId],
+            );
+          }
+        }
+      }
+    }
+
+    // معالجة العناصر المحذوفة (التي كانت في الأصل ولكن ليست في المحدث)
+    for (final originalItem in originalItems) {
+      final originalItemId = originalItem['id'] as int?;
+      final existsInUpdated = updatedItems.any(
+        (item) => item.id == originalItemId,
+      );
+
+      if (!existsInUpdated && originalItemId != null) {
+        // هذا العنصر تم حذفه، نرجع المخزون
+        final originalQuantity = (originalItem['quantity'] as num).toDouble();
+        final originalUnitQuantity =
+            (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+        final originalTotalPieces = originalQuantity * originalUnitQuantity;
+        final productId = originalItem['product_id'] as int?;
+
+        if (productId != null) {
+          await txn.rawUpdate(
+            '''
+          UPDATE products 
+          SET stock = stock + ?, 
+              updated_at = CURRENT_TIMESTAMP 
+          WHERE id = ?
+          ''',
+            [originalTotalPieces, productId],
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _updateInvoiceItems(
+    Transaction txn,
+    int invoiceId,
+    List<SaleInvoiceItem> updatedItems,
+  ) async {
+    // حذف العناصر القديمة
+    await txn.delete(
+      'sales_invoice_items',
+      where: 'invoice_id = ?',
+      whereArgs: [invoiceId],
+    );
+
+    // إضافة العناصر المحدثة
+    for (final item in updatedItems) {
+      await txn.insert('sales_invoice_items', {
+        'invoice_id': invoiceId,
+        'product_id': item.productId,
+        'product_name': item.productName,
+        'price': item.price,
+        'quantity': item.quantity,
+        'total': item.total,
+        'unit_quantity': item.unitQuantity,
+        'unit_name': item.unitName,
+      });
+    }
+  }
+
+  // أضف هذه الدالة في SalesInvoiceService
+  Future<Database> getDatabase() async {
+    return await _dbHelper.database;
+  }
+
+  // في sales_invoice_service.dart - أضف هذه الدوال
+
+  // تحديث المبالغ المدفوعة بعد تعديل الفاتورة
+  Future<bool> updateInvoicePayment({
+    required int invoiceId,
+    required double newPaidAmount,
+    required double newTotal,
+  }) async {
+    final db = await _dbHelper.database;
+
+    try {
+      final newRemainingAmount = newTotal - newPaidAmount;
+
+      // تحديث حالة السداد بناءً على المبالغ الجديدة
+      final paymentStatus = _determinePaymentStatus(
+        newPaidAmount,
+        newTotal,
+        newRemainingAmount,
+      );
+      final paymentType = (newRemainingAmount > 0) ? 'آجل' : 'نقدي';
+
+      await db.update(
+        'sales_invoices',
+        {
+          'total': newTotal,
+          'paid_amount': newPaidAmount,
+          'remaining_amount': newRemainingAmount,
+          'payment_status': paymentStatus,
+          'payment_type': paymentType,
+        },
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+      );
+
+      return true;
+    } catch (e) {
+      throw Exception('فشل في تحديث المدفوعات: $e');
+    }
+  }
+
+  // دالة معدلة لتحديث الفاتورة مع المدفوعات
+  Future<bool> updateInvoiceWithPayment({
+    required int invoiceId,
+    required List<SaleInvoiceItem> updatedItems,
+    required double newPaidAmount,
+  }) async {
+    final db = await _dbHelper.database;
+
+    try {
+      // التحقق من المخزون قبل بدء المعاملة
+      final originalItems = await db.query(
+        'sales_invoice_items',
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+      );
+
+      for (final updatedItem in updatedItems) {
+        final originalItem = originalItems.firstWhere(
+          (item) => item['id'] == updatedItem.id,
+          orElse: () => {},
+        );
+
+        if (originalItem.isNotEmpty && updatedItem.id != null) {
+          final originalQuantity = (originalItem['quantity'] as num).toDouble();
+          final originalUnitQuantity =
+              (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+          final originalTotalPieces = originalQuantity * originalUnitQuantity;
+
+          final newTotalPieces =
+              updatedItem.quantity * updatedItem.unitQuantity;
+          final difference = newTotalPieces - originalTotalPieces;
+
+          // إذا كانت هناك زيادة في الكمية، تحقق من المخزون
+          if (difference > 0) {
+            final productResult = await db.query(
+              'products',
+              where: 'id = ?',
+              whereArgs: [updatedItem.productId],
+            );
+
+            if (productResult.isNotEmpty) {
+              final currentStock =
+                  (productResult.first['stock'] as num).toDouble();
+              if (currentStock < difference) {
+                throw Exception(
+                  'المخزون غير كافي للمنتج ${updatedItem.productName}. المتاح: $currentStock, المطلوب: $difference',
+                );
+              }
+            }
+          }
+        }
+      }
+
+      await db.transaction((txn) async {
+        // 1. مقارنة التغييرات وتحديث المخزون
+        await _syncInventoryChanges(txn, originalItems, updatedItems);
+
+        // 2. تحديث العناصر في قاعدة البيانات
+        await _updateInvoiceItems(txn, invoiceId, updatedItems);
+
+        // 3. حساب الإجمالي الجديد وتحديث المدفوعات
+        await _recalculateAndUpdateInvoice(txn, invoiceId, newPaidAmount);
+      });
+
+      return true;
+    } catch (e) {
+      throw Exception('فشل في تعديل الفاتورة: $e');
+    }
+  }
+
+  // دالة مساعدة معدلة
+  Future<void> _recalculateAndUpdateInvoice(
+    Transaction txn,
+    int invoiceId,
+    double newPaidAmount,
+  ) async {
+    // حساب الإجمالي الجديد من العناصر
+    final items = await txn.query(
+      'sales_invoice_items',
+      where: 'invoice_id = ?',
+      whereArgs: [invoiceId],
+    );
+
+    double newTotal = 0.0;
+    for (final item in items) {
+      newTotal += (item['total'] as num).toDouble();
+    }
+
+    final newRemainingAmount = newTotal - newPaidAmount;
+
+    // التحقق من أن المبلغ المدفوع لا يتجاوز الإجمالي
+    if (newPaidAmount > newTotal) {
+      throw Exception(
+        'المبلغ المدفوع ($newPaidAmount) لا يمكن أن يكون أكبر من الإجمالي ($newTotal)',
+      );
+    }
+
+    // التحقق من أن المبلغ المتبقي غير سالب
+    if (newRemainingAmount < 0) {
+      throw Exception('المبلغ المتبقي لا يمكن أن يكون سالباً');
+    }
+
+    // تحديث الفاتورة بالمبالغ الجديدة
+    await txn.update(
+      'sales_invoices',
+      {
+        'total': newTotal,
+        'paid_amount': newPaidAmount,
+        'remaining_amount': newRemainingAmount,
+        'payment_status': _determinePaymentStatus(
+          newPaidAmount,
+          newTotal,
+          newRemainingAmount,
+        ),
+        'payment_type': (newRemainingAmount > 0) ? 'آجل' : 'نقدي',
+      },
+      where: 'id = ?',
+      whereArgs: [invoiceId],
+    );
   }
 }

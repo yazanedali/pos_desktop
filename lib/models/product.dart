@@ -7,6 +7,8 @@ class Product {
   double stock;
   final String? barcode;
   List<ProductPackage> packages;
+  // Additional barcodes (alternative barcodes) for the same product
+  List<String> additionalBarcodes;
 
   // --- === التعديل الرئيسي === ---
   final int? categoryId; // أضفنا هذا الحقل لتخزين رقم الفئة
@@ -30,6 +32,7 @@ class Product {
     this.createdAt,
     this.updatedAt,
     this.packages = const [],
+    this.additionalBarcodes = const [],
   });
 
   // Convert a Product to a Map for the database
@@ -62,6 +65,7 @@ class Product {
       isActive: map['is_active'] == 1,
       createdAt: map['created_at'],
       updatedAt: map['updated_at'],
+      additionalBarcodes: [], // populated by ProductQueries when needed
     );
   }
 
@@ -78,6 +82,7 @@ class Product {
     String? createdAt,
     String? updatedAt,
     List<ProductPackage>? packages,
+    List<String>? additionalBarcodes,
   }) {
     return Product(
       id: id ?? this.id,
@@ -91,6 +96,7 @@ class Product {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       packages: packages ?? this.packages,
+      additionalBarcodes: additionalBarcodes ?? this.additionalBarcodes,
     );
   }
 

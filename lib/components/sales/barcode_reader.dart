@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pos_desktop/database/product_queries.dart';
 import '../../models/product.dart';
 import '/widgets/top_alert.dart';
 
@@ -37,21 +38,20 @@ class _BarcodeReaderState extends State<BarcodeReader> {
     super.dispose();
   }
 
-  void _handleBarcodeSubmit() {
+  void _handleBarcodeSubmit() async {
+    // جعل الدالة async
     final barcode = _barcodeController.text.trim();
     if (barcode.isEmpty) return;
 
-    final product = widget.products.firstWhere(
-      (p) => p.barcode == barcode,
-      orElse: () => Product(id: null, name: '', price: 0, stock: 0),
-    );
+    // البحث مباشرة في قاعدة البيانات (أضمن وأشمل)
+    final product = await ProductQueries().getProductByBarcode(barcode);
 
-    if (product.id != null) {
+    if (product != null) {
       widget.onProductScanned(product);
       _barcodeController.clear();
-      // بعد مسح النص نعيد التركيز تلقائيًا
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
     } else {
+      if (!mounted) return;
       TopAlert.showError(
         context: context,
         message: 'لم يتم العثور على منتج بهذا الباركود',

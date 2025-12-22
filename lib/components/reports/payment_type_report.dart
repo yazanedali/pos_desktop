@@ -48,9 +48,13 @@ class PaymentTypeReport extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _buildStatItem("إجمالي المبيعات", totalAmount, Colors.blue),
-                    _buildStatItem("المبيعات النقدية", totalCash, Colors.green),
                     _buildStatItem(
-                      "المبيعات الآجلة",
+                      "قيمة الفواتير النقدية",
+                      totalCash,
+                      Colors.green,
+                    ),
+                    _buildStatItem(
+                      "المبالغ المتبقية",
                       totalCredit,
                       Colors.orange,
                     ),
@@ -64,9 +68,9 @@ class PaymentTypeReport extends StatelessWidget {
               columns: const [
                 DataColumn(label: Text("التاريخ")),
                 DataColumn(label: Text("الفواتير النقدية")),
-                DataColumn(label: Text("المبلغ النقدي")),
-                DataColumn(label: Text("الفواتير الآجلة")),
-                DataColumn(label: Text("المبلغ الآجل")),
+                DataColumn(label: Text("قيمة الفواتير النقدية")),
+                DataColumn(label: Text("الفواتير المتبقية")),
+                DataColumn(label: Text("المبلغ المتبقي")),
                 DataColumn(label: Text("الإجمالي")),
               ],
               rows:

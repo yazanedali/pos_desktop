@@ -155,6 +155,7 @@ class _SalesInvoicesState extends State<SalesInvoices> {
             _printInvoice(invoice);
           },
           coustomerName: invoice.customerName ?? 'عميل نقدي',
+          onInvoiceUpdated: _refreshData, // ⬅️ إضافة callback للتحديث
         );
       },
     );
@@ -167,9 +168,18 @@ class _SalesInvoicesState extends State<SalesInvoices> {
     );
   }
 
+  // ⬅️ دالة محدثة لتحديث البيانات
   Future<void> _refreshData() async {
     await _loadInvoices();
     await _loadStatistics();
+
+    // إظهار رسالة نجاح
+    if (mounted) {
+      TopAlert.showSuccess(
+        context: context,
+        message: 'تم تحديث بيانات الفواتير',
+      );
+    }
   }
 
   String _getFormattedDate(DateTime date) {

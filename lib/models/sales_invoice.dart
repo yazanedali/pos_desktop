@@ -106,6 +106,20 @@ class SaleInvoiceItem {
     required this.unitName, // <-- required
   });
 
+  SaleInvoiceItem copyWith({double? quantity, double? total}) {
+    return SaleInvoiceItem(
+      id: id,
+      invoiceId: invoiceId,
+      productId: productId,
+      productName: productName,
+      price: price,
+      quantity: quantity ?? this.quantity,
+      total: total ?? this.total,
+      unitQuantity: unitQuantity,
+      unitName: unitName,
+    );
+  }
+
   factory SaleInvoiceItem.fromMap(Map<String, dynamic> map) {
     return SaleInvoiceItem(
       id: map['id'],

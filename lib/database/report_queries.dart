@@ -97,18 +97,33 @@ class ReportQueries {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> maps = await db.rawQuery(
       '''
-      SELECT 
-        date, 
-        COUNT(id) as invoices, 
-        SUM(total) as total,
-        SUM(CASE WHEN payment_type = 'نقدي' THEN total ELSE 0 END) as cash_total,
-        SUM(CASE WHEN payment_type = 'آجل' THEN total ELSE 0 END) as credit_total,
-        COUNT(CASE WHEN payment_type = 'نقدي' THEN 1 END) as cash_invoices,
-        COUNT(CASE WHEN payment_type = 'آجل' THEN 1 END) as credit_invoices
-      FROM sales_invoices 
-      WHERE date BETWEEN ? AND ? 
-      GROUP BY date 
-      ORDER BY date
+    SELECT 
+      date, 
+      COUNT(id) as invoices, 
+      SUM(total) as total,
+      
+      -- المبلغ النقدي: مجموع paid_amount (المبلغ المدفوع فعلياً)
+      SUM(paid_amount) as cash_total,
+      
+      -- المبلغ المتبقي: مجموع remaining_amount
+      SUM(remaining_amount) as credit_total,
+      
+      -- عدد الفواتير النقدية (التي دفع منها أي مبلغ)
+      COUNT(CASE 
+        WHEN paid_amount > 0 THEN 1 
+        ELSE NULL 
+      END) as cash_invoices,
+      
+      -- عدد الفواتير التي لها دين
+      COUNT(CASE 
+        WHEN remaining_amount > 0 THEN 1 
+        ELSE NULL 
+      END) as credit_invoices
+      
+    FROM sales_invoices 
+    WHERE date BETWEEN ? AND ? 
+    GROUP BY date 
+    ORDER BY date
     ''',
       [from, to],
     );

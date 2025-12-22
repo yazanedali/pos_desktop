@@ -28,7 +28,30 @@ class DatabaseHelper {
 
     String path = join(documentsDirectory.path, 'pos_database.db');
 
-    final db = await openDatabase(path, version: 2, onCreate: _createDatabase);
+    final db = await openDatabase(
+      path,
+      version: 3,
+      onCreate: _createDatabase,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        // Migration path: v2 -> v3 add product_barcodes table
+        if (oldVersion < 3) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS product_barcodes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              product_id INTEGER NOT NULL,
+              barcode TEXT UNIQUE NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+            )
+          ''');
+
+          // Create index to speed up lookups
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_product_barcodes_barcode ON product_barcodes(barcode)',
+          );
+        }
+      },
+    );
 
     return db;
   }
@@ -157,6 +180,20 @@ class DatabaseHelper {
         FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
       )
     ''');
+
+    // جدول باركودات بديلة لكل منتج
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_barcodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        barcode TEXT UNIQUE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_product_barcodes_barcode ON product_barcodes(barcode)',
+    );
 
     // جدول سجلات السداد
     await db.execute('''

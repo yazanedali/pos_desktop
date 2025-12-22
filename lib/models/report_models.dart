@@ -85,10 +85,12 @@ class PaymentTypeReportData {
   final String date;
   final int invoices;
   final double total;
-  final double cashTotal;
-  final double creditTotal;
-  final int cashInvoices;
-  final int creditInvoices;
+  final double cashTotal; // إجمالي قيمة الفواتير النقدية
+  final double creditTotal; // إجمالي قيمة الفواتير الآجلة
+  final int cashInvoices; // عدد الفواتير النقدية
+  final int creditInvoices; // عدد الفواتير الآجلة
+  final double totalPaid; // إجمالي المبلغ المدفوع (للمعلومة)
+  final double totalDebt; // إجمالي المبلغ المتبقي (للمعلومة)
 
   PaymentTypeReportData({
     required this.date,
@@ -98,6 +100,8 @@ class PaymentTypeReportData {
     required this.creditTotal,
     required this.cashInvoices,
     required this.creditInvoices,
+    this.totalPaid = 0.0,
+    this.totalDebt = 0.0,
   });
 }
 

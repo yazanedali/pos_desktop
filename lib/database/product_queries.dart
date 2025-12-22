@@ -5,27 +5,36 @@ import 'package:pos_desktop/models/product_package.dart';
 class ProductQueries {
   final DatabaseHelper dbHelper = DatabaseHelper();
 
-  Future<List<Product>> getAllProducts() async {
-    final db = await dbHelper.database;
-    final results = await db.rawQuery('''
-      SELECT 
-        p.id,
-        p.name,
-        p.price,
-        p.stock,
-        p.barcode,
-        p.created_at,
-        c.name as category,
-        c.color as category_color,
-        c.id as category_id
-      FROM products p 
-      LEFT JOIN categories c ON p.category_id = c.id 
-      WHERE p.is_active = 1
-      ORDER BY p.created_at DESC
-    ''');
+  // ---------------------------------------------------------------------------
+  // دوال مساعدة (Helpers)
+  // ---------------------------------------------------------------------------
 
-    return results.map((map) => Product.fromMap(map)).toList();
+  /// جلب الباركودات الإضافية لمنتج معين
+  Future<List<String>> _getBarcodesForProduct(int productId) async {
+    final db = await dbHelper.database;
+    final rows = await db.query(
+      'product_barcodes',
+      columns: ['barcode'],
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    return rows.map((r) => r['barcode'] as String).toList();
   }
+
+  /// جلب الحزم (Packages) لمنتج معين
+  Future<List<ProductPackage>> getPackagesForProduct(int productId) async {
+    final db = await dbHelper.database;
+    final results = await db.query(
+      'product_packages',
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    return results.map((map) => ProductPackage.fromMap(map)).toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // دوال القراءة (Read / Get)
+  // ---------------------------------------------------------------------------
 
   Future<Product?> getProductById(int id) async {
     final db = await dbHelper.database;
@@ -42,11 +51,21 @@ class ProductQueries {
       [id],
     );
 
-    return results.isNotEmpty ? Product.fromMap(results.first) : null;
+    if (results.isEmpty) return null;
+
+    final product = Product.fromMap(results.first);
+    // تحميل البيانات المرتبطة
+    product.additionalBarcodes = await _getBarcodesForProduct(product.id!);
+    product.packages = await getPackagesForProduct(product.id!);
+
+    return product;
   }
 
+  /// الدالة الأساسية لعملية البيع (Scan)
   Future<Product?> getProductByBarcode(String barcode) async {
     final db = await dbHelper.database;
+
+    // البحث بذكاء: هل الباركود يطابق العمود الرئيسي OR يطابق أي صف في الجدول الفرعي
     final results = await db.rawQuery(
       '''
       SELECT 
@@ -55,13 +74,58 @@ class ProductQueries {
         c.color as category_color
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
-      WHERE p.barcode = ? AND p.is_active = 1
+      LEFT JOIN product_barcodes pb ON p.id = pb.product_id 
+      WHERE p.is_active = 1 
+      AND (p.barcode = ? OR pb.barcode = ?)
+      LIMIT 1
+    ''',
+      [barcode, barcode],
+    );
+
+    if (results.isNotEmpty) {
+      final product = Product.fromMap(results.first);
+      product.additionalBarcodes = await _getBarcodesForProduct(product.id!);
+      product.packages = await getPackagesForProduct(product.id!);
+      return product;
+    }
+
+    // إذا لم نجد المنتج، نبحث في الحزم (Packages)
+    final packageResults = await db.rawQuery(
+      '''
+      SELECT product_id FROM product_packages WHERE barcode = ?
     ''',
       [barcode],
     );
 
-    return results.isNotEmpty ? Product.fromMap(results.first) : null;
+    if (packageResults.isNotEmpty) {
+      final productId = packageResults.first['product_id'] as int;
+      return await getProductById(productId);
+    }
+
+    return null;
   }
+
+  Future<Product?> getProductByName(String name) async {
+    final db = await dbHelper.database;
+    final maps = await db.query(
+      'products',
+      where: 'name = ? AND is_active = 1',
+      whereArgs: [name],
+    );
+    if (maps.isNotEmpty) {
+      final p = Product.fromMap(maps.first);
+      if (p.id != null) {
+        p.additionalBarcodes = await _getBarcodesForProduct(p.id!);
+        p.packages = await getPackagesForProduct(p.id!);
+      }
+      return p;
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // دوال الكتابة (Create / Update / Delete)
+  // ---------------------------------------------------------------------------
 
   Future<Product> createProduct(Product product) async {
     final db = await dbHelper.database;
@@ -87,11 +151,26 @@ class ProductQueries {
           'barcode': package.barcode,
         });
       }
+
+      // 3. إضافة الباركودات الإضافية (إن وُجدت)
+      if (product.additionalBarcodes.isNotEmpty) {
+        for (var code in product.additionalBarcodes) {
+          if (code.trim().isEmpty) continue;
+          // لا نكرر الباركود الأساسي
+          if (product.barcode != null && code == product.barcode) continue;
+          try {
+            await txn.insert('product_barcodes', {
+              'product_id': productId,
+              'barcode': code.trim(),
+            });
+          } catch (e) {
+            // تجاهل الخطأ في حال تكرار الباركود
+          }
+        }
+      }
     });
 
-    final newProduct = (await getProductById(productId!))!;
-    newProduct.packages = await getPackagesForProduct(productId!);
-    return newProduct;
+    return (await getProductById(productId!))!;
   }
 
   Future<Product> updateProduct(int id, Product product) async {
@@ -113,14 +192,12 @@ class ProductQueries {
         whereArgs: [id],
       );
 
-      // 2. حذف كل الحزم القديمة (أسهل طريقة للتعامل مع التعديلات والحذف)
+      // 2. تحديث الحزم (حذف القديم وإضافة الجديد)
       await txn.delete(
         'product_packages',
         where: 'product_id = ?',
         whereArgs: [id],
       );
-
-      // 3. إضافة الحزم الجديدة
       for (var package in product.packages) {
         await txn.insert('product_packages', {
           'product_id': id,
@@ -130,16 +207,80 @@ class ProductQueries {
           'barcode': package.barcode,
         });
       }
+
+      // 3. تحديث الباركودات الإضافية (حذف القديم وإضافة الجديد)
+      await txn.delete(
+        'product_barcodes',
+        where: 'product_id = ?',
+        whereArgs: [id],
+      );
+      if (product.additionalBarcodes.isNotEmpty) {
+        for (var code in product.additionalBarcodes) {
+          if (code.trim().isEmpty) continue;
+          if (product.barcode != null && code == product.barcode) continue;
+          try {
+            await txn.insert('product_barcodes', {
+              'product_id': id,
+              'barcode': code.trim(),
+            });
+          } catch (e) {
+            // تجاهل التكرار
+          }
+        }
+      }
     });
 
-    final updatedProduct = (await getProductById(id))!;
-    updatedProduct.packages = await getPackagesForProduct(id);
-    return updatedProduct;
+    return (await getProductById(id))!;
   }
 
   Future<void> deleteProduct(int id) async {
     final db = await dbHelper.database;
+    // بسبب ON DELETE CASCADE في قاعدة البيانات، سيتم حذف الباركودات والحزم تلقائياً
     await db.delete('products', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> updateProductStock(int productId, int newStock) async {
+    final db = await dbHelper.database;
+    await db.update(
+      'products',
+      {'stock': newStock, 'updated_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [productId],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // دوال القوائم والبحث (List & Search)
+  // ---------------------------------------------------------------------------
+
+  Future<List<Product>> getAllProducts() async {
+    final db = await dbHelper.database;
+    // نستخدم GROUP BY لضمان عدم تكرار المنتج في القائمة
+    final results = await db.rawQuery('''
+      SELECT 
+        p.id,
+        p.name,
+        p.price,
+        p.stock,
+        p.barcode,
+        p.created_at,
+        c.name as category,
+        c.color as category_color,
+        c.id as category_id
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE p.is_active = 1
+      ORDER BY p.created_at DESC
+    ''');
+
+    final products = results.map((map) => Product.fromMap(map)).toList();
+    // تحميل الباركودات الإضافية لكل منتج
+    for (var p in products) {
+      if (p.id != null) {
+        p.additionalBarcodes = await _getBarcodesForProduct(p.id!);
+      }
+    }
+    return products;
   }
 
   Future<List<Product>> searchProducts(String searchTerm) async {
@@ -157,44 +298,35 @@ class ProductQueries {
         c.color as category_color
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
+      LEFT JOIN product_barcodes pb ON pb.product_id = p.id
       WHERE p.is_active = 1 
-        AND (p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)
+        AND (
+          p.name LIKE ? 
+          OR p.barcode LIKE ? 
+          OR pb.barcode LIKE ? -- ✅ البحث في الباركودات الإضافية
+          OR c.name LIKE ?
+        )
+      GROUP BY p.id -- ✅ منع تكرار المنتج في النتائج
       ORDER BY p.created_at DESC
     ''',
-      ['%$searchTerm%', '%$searchTerm%', '%$searchTerm%'],
+      ['%$searchTerm%', '%$searchTerm%', '%$searchTerm%', '%$searchTerm%'],
     );
 
-    return results.map((map) => Product.fromMap(map)).toList();
+    final products = results.map((map) => Product.fromMap(map)).toList();
+    for (var p in products) {
+      if (p.id != null) {
+        p.additionalBarcodes = await _getBarcodesForProduct(p.id!);
+      }
+    }
+    return products;
   }
 
-  Future<void> updateProductStock(int productId, int newStock) async {
-    final db = await dbHelper.database;
-    await db.update(
-      'products',
-      {'stock': newStock, 'updated_at': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [productId],
-    );
-  }
+  // ---------------------------------------------------------------------------
+  // Pagination (نظام الصفحات)
+  // ---------------------------------------------------------------------------
 
-  Future<List<ProductPackage>> getPackagesForProduct(int productId) async {
-    final db = await dbHelper.database;
-    final results = await db.query(
-      'product_packages',
-      where: 'product_id = ?',
-      whereArgs: [productId],
-    );
-    return results.map((map) => ProductPackage.fromMap(map)).toList();
-  }
-
-  // ********************************************************
-  // 1. ثابت لحجم الصفحة
-  // ********************************************************
   static const int pageSize = 16;
 
-  // ********************************************************
-  // 2. دالة جلب المنتجات بشكل مُرقّم
-  // ********************************************************
   Future<List<Product>> getProductsPaginated({
     required int page,
     String? searchTerm,
@@ -203,13 +335,20 @@ class ProductQueries {
     final db = await dbHelper.database;
     final offset = (page - 1) * pageSize;
 
-    // بناء شرط WHERE
     final conditions = <String>['p.is_active = 1'];
     final args = <Object>[];
 
     if (searchTerm != null && searchTerm.isNotEmpty) {
-      conditions.add('(p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)');
-      args.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
+      // ✅ تمت إضافة pb.barcode للبحث
+      conditions.add(
+        '(p.name LIKE ? OR p.barcode LIKE ? OR pb.barcode LIKE ? OR c.name LIKE ?)',
+      );
+      args.addAll([
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+      ]);
     }
 
     if (categoryId != null) {
@@ -219,7 +358,6 @@ class ProductQueries {
 
     final whereClause = conditions.join(' AND ');
 
-    // بناء الاستعلام مع LIMIT و OFFSET
     final results = await db.rawQuery('''
       SELECT 
         p.id,
@@ -233,26 +371,81 @@ class ProductQueries {
         c.id as category_id
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
+      LEFT JOIN product_barcodes pb ON pb.product_id = p.id
       WHERE $whereClause
+      GROUP BY p.id -- ✅ ضروري جداً لمنع التكرار عند وجود عدة باركودات
       ORDER BY p.created_at DESC
       LIMIT $pageSize OFFSET $offset
     ''', args);
 
-    return results.map((map) => Product.fromMap(map)).toList();
+    final products = results.map((map) => Product.fromMap(map)).toList();
+    for (var p in products) {
+      if (p.id != null) {
+        p.additionalBarcodes = await _getBarcodesForProduct(p.id!);
+      }
+    }
+    return products;
   }
 
-  // ********************************************************
-  // 3. دالة جلب العدد الكلي للمنتجات مع الفلترة والبحث
-  // ********************************************************
   Future<int> getProductsCount({String? searchTerm, int? categoryId}) async {
     final db = await dbHelper.database;
 
-    // بناء شرط WHERE
     final conditions = <String>['p.is_active = 1'];
     final args = <Object>[];
 
     if (searchTerm != null && searchTerm.isNotEmpty) {
-      conditions.add('(p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)');
+      conditions.add(
+        '(p.name LIKE ? OR p.barcode LIKE ? OR pb.barcode LIKE ? OR c.name LIKE ?)',
+      );
+      args.addAll([
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+      ]);
+    }
+
+    if (categoryId != null) {
+      conditions.add('p.category_id = ?');
+      args.add(categoryId);
+    }
+
+    final whereClause = conditions.join(' AND ');
+
+    final result = await db.rawQuery('''
+      SELECT 
+        COUNT(DISTINCT p.id) AS count -- ✅ عد المنتجات الفريدة فقط
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+      WHERE $whereClause
+    ''', args);
+
+    return result.first['count'] as int? ?? 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // دوال أخرى
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> getAllCategories() async {
+    final db = await dbHelper.database;
+    return await db.query('categories', orderBy: 'name');
+  }
+
+  Future<List<Product>> getProductsForPurchase({
+    String? searchTerm,
+    int? categoryId,
+  }) async {
+    final db = await dbHelper.database;
+
+    final conditions = <String>['p.is_active = 1'];
+    final args = <Object>[];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      conditions.add(
+        '(p.name LIKE ? OR p.barcode LIKE ? OR pb.barcode LIKE ?)',
+      );
       args.addAll(['%$searchTerm%', '%$searchTerm%', '%$searchTerm%']);
     }
 
@@ -263,36 +456,31 @@ class ProductQueries {
 
     final whereClause = conditions.join(' AND ');
 
-    // الاستعلام عن العدد
-    final result = await db.rawQuery('''
-      SELECT 
-        COUNT(p.id) AS count
-      FROM products p 
-      LEFT JOIN categories c ON p.category_id = c.id 
-      WHERE $whereClause
-    ''', args);
+    final results = await db.rawQuery('''
+    SELECT 
+      p.id,
+      p.name,
+      p.price,
+      p.stock,
+      p.barcode,
+      p.category_id,
+      c.name as category,
+      c.color as category_color
+    FROM products p 
+    LEFT JOIN categories c ON p.category_id = c.id 
+    LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+    WHERE $whereClause
+    GROUP BY p.id -- ✅ منع التكرار
+    ORDER BY p.name
+    LIMIT 100
+  ''', args);
 
-    return result.first['count'] as int? ?? 0;
-  }
-
-  // ********************************************************
-  // 4. دالة لجلب كل الفئات (Categories) (مطلوبة للفلترة)
-  // ********************************************************
-  Future<List<Map<String, dynamic>>> getAllCategories() async {
-    final db = await dbHelper.database;
-    return await db.query('categories', orderBy: 'name');
-  }
-
-  Future<Product?> getProductByName(String name) async {
-    final db = await DatabaseHelper().database;
-    final maps = await db.query(
-      'products',
-      where: 'name = ? AND is_active = 1',
-      whereArgs: [name],
-    );
-    if (maps.isNotEmpty) {
-      return Product.fromMap(maps.first);
+    final products = results.map((map) => Product.fromMap(map)).toList();
+    for (var p in products) {
+      if (p.id != null) {
+        p.additionalBarcodes = await _getBarcodesForProduct(p.id!);
+      }
     }
-    return null;
+    return products;
   }
 }

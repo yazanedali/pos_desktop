@@ -1,3 +1,4 @@
+import 'dart:async'; // 1. استيراد هذه المكتبة للمؤقت
 import 'package:flutter/material.dart';
 import '../../models/category.dart';
 import '../../models/product.dart';
@@ -7,7 +8,6 @@ class ProductsGrid extends StatefulWidget {
   final List<Category> categories;
   final void Function(Product) onProductAdded;
 
-  // خصائص Lazy Loading الجديدة
   final bool hasMore;
   final bool isLoadingMore;
   final VoidCallback? onLoadMore;
@@ -39,26 +39,52 @@ class ProductsGrid extends StatefulWidget {
 class _ProductsGridState extends State<ProductsGrid> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  Timer? _debounce; // 2. متغير للمؤقت
 
   @override
   void initState() {
     super.initState();
-    _searchController.text = widget.searchTerm;
+    // ضبط النص الأولي فقط إذا كان مختلفاً
+    if (widget.searchTerm != _searchController.text) {
+      _searchController.text = widget.searchTerm;
+    }
     _setupScrollListener();
   }
 
   @override
   void didUpdateWidget(ProductsGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.searchTerm != widget.searchTerm) {
+    // تحديث النص فقط إذا تغير من المصدر الخارجي وليس أثناء الكتابة
+    if (widget.searchTerm != oldWidget.searchTerm &&
+        widget.searchTerm != _searchController.text) {
+      // تأكد أن المؤشر لا يقفز
+      final selection = _searchController.selection;
       _searchController.text = widget.searchTerm;
+      // محاولة الحفاظ على موقع المؤشر إذا أمكن
+      if (selection.baseOffset <= widget.searchTerm.length) {
+        _searchController.selection = selection;
+      }
     }
+  }
+
+  // 3. دالة معالجة تغيير النص مع التأخير (Debounce)
+  void _onSearchChanged(String query) {
+    // إلغاء المؤقت السابق إذا كان نشطاً (المستخدم لا يزال يكتب)
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    // إنشاء مؤقت جديد ينتظر 500 ميلي ثانية قبل تنفيذ البحث
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (widget.onSearch != null) {
+        widget.onSearch!(query);
+      }
+    });
   }
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels ==
-          _scrollController.position.maxScrollExtent) {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
+        // تحميل قبل الوصول للنهاية بقليل
         widget.onLoadMore?.call();
       }
     });
@@ -66,13 +92,15 @@ class _ProductsGridState extends State<ProductsGrid> {
 
   @override
   void dispose() {
+    _debounce?.cancel(); // 4. إلغاء المؤقت عند الخروج
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   bool get _hasFilters {
-    return widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null;
+    return _searchController.text.isNotEmpty ||
+        widget.selectedCategoryId != null;
   }
 
   @override
@@ -109,7 +137,10 @@ class _ProductsGridState extends State<ProductsGrid> {
                   ),
                   const SizedBox(width: 8),
                   OutlinedButton(
-                    onPressed: widget.onClearFilters,
+                    onPressed: () {
+                      _searchController.clear();
+                      widget.onClearFilters?.call();
+                    },
                     child: const Text('مسح الفلترة'),
                   ),
                 ],
@@ -122,7 +153,12 @@ class _ProductsGridState extends State<ProductsGrid> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: TextField(
               controller: _searchController,
-              onChanged: widget.onSearch,
+              onChanged: _onSearchChanged, // 5. استخدام دالة التأخير هنا
+              onSubmitted: (val) {
+                // البحث فوراً عند الضغط على Enter
+                if (_debounce?.isActive ?? false) _debounce!.cancel();
+                widget.onSearch?.call(val);
+              },
               decoration: InputDecoration(
                 hintText: "ابحث بالاسم, الباركود, أو الفئة...",
                 prefixIcon: const Icon(Icons.search),
@@ -132,6 +168,9 @@ class _ProductsGridState extends State<ProductsGrid> {
                           icon: const Icon(Icons.clear),
                           onPressed: () {
                             _searchController.clear();
+                            // إلغاء المؤقت وتنفيذ بحث فارغ فوراً
+                            if (_debounce?.isActive ?? false)
+                              _debounce!.cancel();
                             widget.onSearch?.call("");
                           },
                         )
@@ -147,14 +186,13 @@ class _ProductsGridState extends State<ProductsGrid> {
             ),
           ),
 
-          // فلترة الفئات
+          // فلترة الفئات (نفس الكود السابق)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  // زر عرض الكل
                   InkWell(
                     onTap: () => widget.onCategorySelected?.call(null),
                     child: Container(
@@ -182,8 +220,6 @@ class _ProductsGridState extends State<ProductsGrid> {
                     ),
                   ),
                   const SizedBox(width: 8),
-
-                  // قائمة الفئات
                   ...widget.categories.map((category) {
                     return Padding(
                       padding: const EdgeInsets.only(left: 8),
@@ -221,19 +257,14 @@ class _ProductsGridState extends State<ProductsGrid> {
             ),
           ),
 
-          // شبكة المنتجات مع Lazy Loading
+          // شبكة المنتجات (نفس الكود السابق)
           Expanded(
             child:
                 widget.products.isEmpty
                     ? _buildEmptyState()
                     : NotificationListener<ScrollNotification>(
                       onNotification: (scrollNotification) {
-                        if (scrollNotification is ScrollEndNotification) {
-                          if (_scrollController.position.pixels ==
-                              _scrollController.position.maxScrollExtent) {
-                            widget.onLoadMore?.call();
-                          }
-                        }
+                        // تم نقل المنطق إلى _setupScrollListener لكن هذا لا يضر
                         return false;
                       },
                       child: GridView.builder(
@@ -249,7 +280,6 @@ class _ProductsGridState extends State<ProductsGrid> {
                         itemCount:
                             widget.products.length + (widget.hasMore ? 1 : 0),
                         itemBuilder: (context, index) {
-                          // مؤشر تحميل المزيد
                           if (index == widget.products.length &&
                               widget.hasMore) {
                             return _buildLoadMoreIndicator();
@@ -274,7 +304,6 @@ class _ProductsGridState extends State<ProductsGrid> {
                     ),
           ),
 
-          // مؤشر تحميل إضافي
           if (widget.isLoadingMore)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -285,33 +314,24 @@ class _ProductsGridState extends State<ProductsGrid> {
     );
   }
 
+  // الدوال المساعدة (_buildEmptyState, _buildLoadMoreIndicator, _hexToColor) تبقى كما هي
   Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null
-                ? Icons.search_off
-                : Icons.inventory_2_outlined,
+            _hasFilters ? Icons.search_off : Icons.inventory_2_outlined,
             size: 48,
             color: Colors.grey,
           ),
           const SizedBox(height: 16),
           Text(
-            widget.searchTerm.isNotEmpty || widget.selectedCategoryId != null
+            _hasFilters
                 ? "لا توجد منتجات مطابقة للبحث"
                 : "لا توجد منتجات متاحة",
             style: const TextStyle(fontSize: 16, color: Colors.grey),
           ),
-          if (widget.searchTerm.isNotEmpty ||
-              widget.selectedCategoryId != null) ...[
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: widget.onClearFilters,
-              child: const Text('مسح الفلترة'),
-            ),
-          ],
         ],
       ),
     );
@@ -352,7 +372,6 @@ class _ProductsGridState extends State<ProductsGrid> {
   }
 }
 
-// ProductSaleCard يبقى كما هو بدون تغيير
 class ProductSaleCard extends StatefulWidget {
   final Product product;
   final Category category;

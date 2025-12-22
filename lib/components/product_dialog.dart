@@ -1,16 +1,17 @@
-// components/product_dialog.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pos_desktop/dialogs/quick_add_category_dialog.dart';
 import 'package:pos_desktop/models/category.dart';
 import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/models/product_package.dart';
+import 'package:pos_desktop/widgets/top_alert.dart';
 
 class ProductDialog extends StatefulWidget {
   final Product? product;
   final List<Category> categories;
   final Function(Product) onSave;
   final Function() onCancel;
+  final Function(List<Category>)? onCategoriesUpdate;
 
   const ProductDialog({
     super.key,
@@ -18,6 +19,7 @@ class ProductDialog extends StatefulWidget {
     required this.categories,
     required this.onSave,
     required this.onCancel,
+    this.onCategoriesUpdate,
   });
 
   @override
@@ -30,11 +32,12 @@ class _ProductDialogState extends State<ProductDialog> {
   late TextEditingController _priceController;
   late TextEditingController _stockController;
   late TextEditingController _barcodeController;
+  late List<TextEditingController> _additionalBarcodeControllers;
   int? _selectedCategoryId;
   String? _selectedCategoryName;
 
-  //   ***** 1. متغير جديد لإدارة قائمة الحزم *****
   late List<ProductPackage> _packages;
+  List<Category> _localCategories = [];
 
   @override
   void initState() {
@@ -54,15 +57,24 @@ class _ProductDialogState extends State<ProductDialog> {
       text: isEditing ? widget.product!.barcode : '',
     );
 
+    _additionalBarcodeControllers = [];
+    if (isEditing && widget.product!.additionalBarcodes.isNotEmpty) {
+      for (var code in widget.product!.additionalBarcodes) {
+        _additionalBarcodeControllers.add(TextEditingController(text: code));
+      }
+    }
+
+    _localCategories = List<Category>.from(widget.categories);
+
     if (isEditing && widget.product!.categoryId != null) {
-      final category = widget.categories.firstWhere(
+      final category = _localCategories.firstWhere(
         (c) => c.id == widget.product!.categoryId,
+        orElse: () => Category(id: 0, name: 'غير معروف', color: '#000000'),
       );
       _selectedCategoryId = category.id;
       _selectedCategoryName = category.name;
     }
 
-    // نسخ قائمة الحزم إلى متغير محلي لتمكين التعديل عليها
     _packages =
         isEditing
             ? List<ProductPackage>.from(
@@ -79,11 +91,13 @@ class _ProductDialogState extends State<ProductDialog> {
     _priceController.dispose();
     _stockController.dispose();
     _barcodeController.dispose();
+    for (var c in _additionalBarcodeControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _generateBarcode() {
-    // استخدام باركود كامل لضمان عدم التكرار
     final barcode = DateTime.now().millisecondsSinceEpoch.toString();
     setState(() {
       _barcodeController.text = barcode;
@@ -96,9 +110,6 @@ class _ProductDialogState extends State<ProductDialog> {
     return Color(int.parse(hex, radix: 16));
   }
 
-  // ... (dispose, _generateBarcode, _hexToColor - تبقى كما هي)
-
-  //   ***** 2. دوال جديدة لإدارة الحزم *****
   void _addNewPackage() {
     setState(() {
       _packages.add(
@@ -113,19 +124,93 @@ class _ProductDialogState extends State<ProductDialog> {
     });
   }
 
-  //   ***** 3. تحديث دالة الحفظ *****
+  // ← دالة لفتح نافذة إضافة فئة سريعة
+  void _openQuickAddCategory() async {
+    final newCategory = await showDialog<Category>(
+      context: context,
+      builder:
+          (context) =>
+              QuickAddCategoryDialog(existingCategories: _localCategories),
+    );
+
+    if (newCategory != null) {
+      // تأكد من عدم وجود فئات مكررة بنفس ID
+      int newId;
+      if (_localCategories.isEmpty) {
+        newId = 1;
+      } else {
+        // البحث عن أكبر ID موجود وإضافة 1 له
+        final maxId = _localCategories
+            .where((c) => c.id != null)
+            .map((c) => c.id!)
+            .fold<int>(0, (prev, id) => id > prev ? id : prev);
+        newId = maxId + 1;
+      }
+
+      final newCategoryWithId = Category(
+        id: newId,
+        name: newCategory.name,
+        description: newCategory.description,
+        color: newCategory.color,
+      );
+
+      // التحقق من عدم وجود فئة بنفس ID بالفعل
+      bool idExists = _localCategories.any((c) => c.id == newId);
+      if (idExists) {
+        TopAlert.showError(
+          context: context,
+          message: "حدث خطأ: يوجد فئة بنفس المعرف مسبقاً",
+        );
+        return;
+      }
+
+      // إضافة الفئة الجديدة إلى القائمة
+      setState(() {
+        _localCategories.add(newCategoryWithId);
+      });
+
+      // اختيار الفئة الجديدة تلقائياً
+      setState(() {
+        _selectedCategoryId = newCategoryWithId.id;
+        _selectedCategoryName = newCategoryWithId.name;
+      });
+
+      // إعلام الوالد بالتحديث
+      if (widget.onCategoriesUpdate != null) {
+        widget.onCategoriesUpdate!(_localCategories);
+      }
+
+      TopAlert.showSuccess(
+        context: context,
+        message: "تمت إضافة الفئة '${newCategoryWithId.name}' بنجاح",
+      );
+    }
+  }
+
   void _submitForm() {
     if (_formKey.currentState!.validate()) {
+      if (_selectedCategoryId == null) {
+        TopAlert.showError(context: context, message: "يرجى اختيار فئة للمنتج");
+        return;
+      }
+
+      final additionalBarcodes =
+          _additionalBarcodeControllers
+              .map((c) => c.text.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+
       final product = Product(
         id: widget.product?.id,
         name: _nameController.text,
         price: double.tryParse(_priceController.text) ?? 0.0,
-        stock: double.tryParse(_stockController.text) ?? 0.0, // <-- يدعم double
+        stock: double.tryParse(_stockController.text) ?? 0.0,
         barcode:
             _barcodeController.text.isEmpty ? null : _barcodeController.text,
         categoryId: _selectedCategoryId!,
         category: _selectedCategoryName,
-        packages: _packages, // <-- إضافة الحزم
+        packages: _packages,
+        additionalBarcodes: additionalBarcodes,
       );
       widget.onSave(product);
     }
@@ -136,9 +221,7 @@ class _ProductDialogState extends State<ProductDialog> {
     return Dialog(
       insetPadding: const EdgeInsets.all(20),
       child: Container(
-        width:
-            MediaQuery.of(context).size.width *
-            0.6, // زيادة العرض لاستيعاب الحزم
+        width: MediaQuery.of(context).size.width * 0.6,
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
@@ -153,10 +236,8 @@ class _ProductDialogState extends State<ProductDialog> {
                 child: SingleChildScrollView(
                   child: Column(
                     children: [
-                      // --- الجزء العلوي (بيانات المنتج الأساسية) ---
                       _buildBasicInfoSection(),
                       const Divider(height: 30, thickness: 1),
-                      //   ***** 4. قسم جديد لإدارة الحزم *****
                       _buildPackagesSection(),
                     ],
                   ),
@@ -171,7 +252,6 @@ class _ProductDialogState extends State<ProductDialog> {
     );
   }
 
-  // ودجت لبيانات المنتج الأساسية (لتنظيم الكود)
   Widget _buildBasicInfoSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,7 +283,10 @@ class _ProductDialogState extends State<ProductDialog> {
                       : null,
         ),
         const SizedBox(height: 20),
+
+        // --- صف السعر والكمية ---
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start, // محاذاة للأعلى
           children: [
             Expanded(
               child: TextFormField(
@@ -232,7 +315,7 @@ class _ProductDialogState extends State<ProductDialog> {
               child: TextFormField(
                 controller: _stockController,
                 decoration: const InputDecoration(
-                  labelText: "الكمية بالمخزون (بالوحدة الأساسية)",
+                  labelText: "الكمية بالمخزون",
                   prefixIcon: Icon(Icons.inventory_2_outlined),
                   border: OutlineInputBorder(),
                 ),
@@ -246,11 +329,102 @@ class _ProductDialogState extends State<ProductDialog> {
             ),
           ],
         ),
+
+        // --- تم نقل قسم الباركودات الإضافية هنا (خارج الـ TextFormField والـ Row) ---
+        const SizedBox(height: 20),
+
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "باركودات إضافية (للنكهات المتعددة أو الألوان)",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _additionalBarcodeControllers.add(
+                          TextEditingController(),
+                        );
+                      });
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text("إضافة باركود"),
+                    style: TextButton.styleFrom(foregroundColor: Colors.blue),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_additionalBarcodeControllers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'لا توجد باركودات بديلة، اضغط "إضافة باركود" لإضافة واحد.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _additionalBarcodeControllers.length,
+                  itemBuilder: (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _additionalBarcodeControllers[index],
+                              decoration: InputDecoration(
+                                labelText: 'باركود بديل ${index + 1}',
+                                prefixIcon: const Icon(Icons.qr_code, size: 20),
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.all(12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                final controller = _additionalBarcodeControllers
+                                    .removeAt(index);
+                                controller.dispose();
+                              });
+                            },
+                            tooltip: "حذف هذا الباركود",
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+
+        // -------------------------------------------------------------------
         const SizedBox(height: 20),
         TextFormField(
           controller: _barcodeController,
           decoration: InputDecoration(
-            labelText: "باركود الوحدة الأساسية",
+            labelText: "باركود الوحدة الأساسية (الرئيسي)",
             prefixIcon: const Icon(Icons.qr_code_2_outlined),
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
@@ -260,49 +434,104 @@ class _ProductDialogState extends State<ProductDialog> {
           ),
         ),
         const SizedBox(height: 20),
-        DropdownButtonFormField<int>(
-          value: _selectedCategoryId,
-          decoration: const InputDecoration(
-            labelText: "الفئة *",
-            prefixIcon: Icon(Icons.category_outlined),
-            border: OutlineInputBorder(),
-          ),
-          validator: (value) => value == null ? "يرجى اختيار فئة" : null,
-          items:
-              widget.categories.map((category) {
-                return DropdownMenuItem(
-                  value: category.id,
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: _hexToColor(category.color),
-                          shape: BoxShape.circle,
-                        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "اختر فئة المنتج *",
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _openQuickAddCategory,
+                      icon: const Icon(Icons.add_circle_outline, size: 14),
+                      label: const Text("فئة جديدة"),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
                       ),
-                      const SizedBox(width: 10),
-                      Text(category.name),
-                    ],
-                  ),
-                );
-              }).toList(),
-          onChanged: (value) {
-            if (value != null) {
-              setState(() {
-                _selectedCategoryId = value;
-                _selectedCategoryName =
-                    widget.categories.firstWhere((c) => c.id == value).name;
-              });
-            }
-          },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_localCategories.isNotEmpty)
+              DropdownButtonFormField<int>(
+                value: _selectedCategoryId,
+                decoration: const InputDecoration(
+                  labelText: "الفئة *",
+                  prefixIcon: Icon(Icons.category_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                validator: (value) => value == null ? "يرجى اختيار فئة" : null,
+                items:
+                    _localCategories
+                        .where((category) => category.id != null)
+                        .toSet()
+                        .toList()
+                        .map((category) {
+                          return DropdownMenuItem<int>(
+                            value: category.id,
+                            child: Container(
+                              constraints: const BoxConstraints(maxWidth: 300),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 14,
+                                    height: 14,
+                                    decoration: BoxDecoration(
+                                      color: _hexToColor(category.color),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Flexible(
+                                    child: Text(
+                                      category.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        })
+                        .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    final selectedCategory = _localCategories.firstWhere(
+                      (c) => c.id == value,
+                    );
+                    setState(() {
+                      _selectedCategoryId = value;
+                      _selectedCategoryName = selectedCategory.name;
+                    });
+                  }
+                },
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                alignment: Alignment.center,
+                child: const Text(
+                  "لا توجد فئات متاحة. يرجى إضافة فئة جديدة.",
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+          ],
         ),
       ],
     );
   }
 
-  //   ***** 5. ودجت جديد ومستقل لإدارة الحزم *****
   Widget _buildPackagesSection() {
     return Column(
       children: [
@@ -353,7 +582,6 @@ class _ProductDialogState extends State<ProductDialog> {
     );
   }
 
-  // ودجت لعرض حقول الحزمة الواحدة
   Widget _buildPackageRow(ProductPackage package, int index) {
     return Card(
       color: Colors.blue.shade50,
@@ -444,7 +672,6 @@ class _ProductDialogState extends State<ProductDialog> {
     );
   }
 
-  // ودجت لأزرار الحفظ والإلغاء (لتنظيم الكود)
   Widget _buildActionButtons() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
