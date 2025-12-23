@@ -164,7 +164,6 @@ class _IndexPageState extends State<IndexPage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            // ignore: deprecated_member_use
             color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
@@ -174,7 +173,10 @@ class _IndexPageState extends State<IndexPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: List.generate(_pages.length, (index) {
-          return Expanded(child: _buildNavItem(index));
+          return Expanded(
+            // ✅ Expanded هنا فقط
+            child: _buildNavItem(index),
+          );
         }),
       ),
     );
@@ -191,32 +193,37 @@ class _IndexPageState extends State<IndexPage> {
             _selectedIndex = index;
           });
         },
-        child: Column(
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration:
-                  isSelected
-                      ? BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            // ignore: deprecated_member_use
-                            color: Colors.blue.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      )
-                      : null,
-              child: Row(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4), // إضافة هامش بسيط
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? null : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            gradient:
+                isSelected
+                    ? const LinearGradient(
+                      colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    )
+                    : null,
+            boxShadow:
+                isSelected
+                    ? [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                    : null,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     _pageIcons[index],
@@ -234,19 +241,19 @@ class _IndexPageState extends State<IndexPage> {
                   ),
                 ],
               ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              margin: const EdgeInsets.only(top: 6),
-              height: 4,
-              width: isSelected ? 28 : 0,
-              decoration: BoxDecoration(
-                color:
-                    isSelected ? const Color(0xFF4A80F0) : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                margin: const EdgeInsets.only(top: 6),
+                height: 4,
+                width: isSelected ? 28 : 0,
+                decoration: BoxDecoration(
+                  color:
+                      isSelected ? const Color(0xFF4A80F0) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
