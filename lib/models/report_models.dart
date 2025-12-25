@@ -32,6 +32,7 @@ class PurchaseReportData {
   });
 }
 
+// الموديل الحالي لديك:
 class ProfitReportData {
   final String date;
   final double sales;
@@ -43,6 +44,24 @@ class ProfitReportData {
     required this.sales,
     required this.purchases,
     required this.profit,
+  });
+}
+
+// موديل جديد للربح الفعلي
+// الموديل الجديد:
+class ActualProfitReportData {
+  final String date;
+  final double sales;
+  final double costOfGoodsSold; // تكلفة البضاعة المباعة
+  final double actualProfit; // الربح الفعلي
+  final double profitMargin; // هامش الربح %
+
+  ActualProfitReportData({
+    required this.date,
+    required this.sales,
+    required this.costOfGoodsSold,
+    required this.actualProfit,
+    required this.profitMargin,
   });
 }
 

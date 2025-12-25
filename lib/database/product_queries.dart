@@ -42,6 +42,7 @@ class ProductQueries {
       '''
       SELECT 
         p.*,
+        p.purchase_price,
         c.name as category,
         c.color as category_color
       FROM products p 
@@ -70,6 +71,7 @@ class ProductQueries {
       '''
       SELECT 
         p.*,
+        p.purchase_price,
         c.name as category,
         c.color as category_color
       FROM products p 
@@ -136,6 +138,7 @@ class ProductQueries {
       productId = await txn.insert('products', {
         'name': product.name,
         'price': product.price,
+        'purchase_price': product.purchasePrice,
         'stock': product.stock,
         'barcode': product.barcode,
         'category_id': product.categoryId,
@@ -183,6 +186,7 @@ class ProductQueries {
         {
           'name': product.name,
           'price': product.price,
+          'purchase_price': product.purchasePrice,
           'stock': product.stock,
           'barcode': product.barcode,
           'category_id': product.categoryId,
@@ -261,6 +265,7 @@ class ProductQueries {
         p.id,
         p.name,
         p.price,
+        p.purchase_price,
         p.stock,
         p.barcode,
         p.created_at,
@@ -291,6 +296,7 @@ class ProductQueries {
         p.id,
         p.name,
         p.price,
+        p.purchase_price,
         p.stock,
         p.barcode,
         p.created_at,
@@ -363,6 +369,7 @@ class ProductQueries {
         p.id,
         p.name,
         p.price,
+        p.purchase_price,
         p.stock,
         p.barcode,
         p.created_at,
@@ -461,6 +468,7 @@ class ProductQueries {
       p.id,
       p.name,
       p.price,
+      p.purchase_price,
       p.stock,
       p.barcode,
       p.category_id,

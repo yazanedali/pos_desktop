@@ -4,6 +4,7 @@ import '../models/report_models.dart';
 import './reports/sales_report.dart';
 import './reports/purchases_report.dart';
 import './reports/profits_report.dart';
+import './reports/actual_profits_report.dart'; // أضف هذا الاستيراد
 import './reports/top_selling_report.dart';
 import './reports/purchased_items_report.dart';
 import './reports/sold_items_report.dart';
@@ -34,7 +35,8 @@ class _ReportsSectionState extends State<ReportsSection> {
   final List<Map<String, String>> _reportTypes = [
     {"value": "sales", "label": "تقرير المبيعات"},
     {"value": "purchases", "label": "تقرير المشتريات"},
-    {"value": "profits", "label": "تقرير الأرباح"},
+    {"value": "profits", "label": "تقرير الأرباح (بسيط)"},
+    {"value": "actual-profits", "label": "تقرير الأرباح الفعلي"}, // أضف هذا
     {"value": "top-selling", "label": "المنتجات الأكثر مبيعاً"},
     {"value": "purchased-items", "label": "المنتجات المشتراة"},
     {"value": "sold-items", "label": "المنتجات المباعة"},
@@ -96,6 +98,9 @@ class _ReportsSectionState extends State<ReportsSection> {
         case "profits":
           data = await _reportQueries.getProfitReport(from, to);
           break;
+        case "actual-profits": // أضف هذا
+          data = await _reportQueries.getActualProfitReport(from, to);
+          break;
         case "top-selling":
           data = await _reportQueries.getTopSellingProducts(from, to);
           break;
@@ -152,6 +157,10 @@ class _ReportsSectionState extends State<ReportsSection> {
         return PurchasesReport(data: _reportData as List<PurchaseReportData>);
       case "profits":
         return ProfitsReport(data: _reportData as List<ProfitReportData>);
+      case "actual-profits": // أضف هذا
+        return ActualProfitsReport(
+          data: _reportData as List<ActualProfitReportData>,
+        );
       case "top-selling":
         return TopSellingReport(data: _reportData as List<ProductReportData>);
       case "purchased-items":

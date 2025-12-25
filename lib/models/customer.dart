@@ -6,6 +6,7 @@ class Customer {
   final String? phone;
   final String? address;
   final String? createdAt;
+  final double walletBalance; // <-- الرصيد (موجب = له مصاري، سالب = عليه مصاري - لكن غالبا هنا نستخدمه كرصيد إيجابي والدين يحسب من الفواتير)
 
   Customer({
     this.id,
@@ -13,6 +14,7 @@ class Customer {
     this.phone,
     this.address,
     this.createdAt,
+    this.walletBalance = 0.0,
   });
 
   // دالة لتحويل كائن العميل إلى خريطة (Map) لحفظه في قاعدة البيانات
@@ -23,6 +25,7 @@ class Customer {
       'phone': phone,
       'address': address,
       'created_at': createdAt,
+      'wallet_balance': walletBalance,
     };
   }
 
@@ -34,6 +37,7 @@ class Customer {
       phone: map['phone'],
       address: map['address'],
       createdAt: map['created_at'],
+      walletBalance: (map['wallet_balance'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }

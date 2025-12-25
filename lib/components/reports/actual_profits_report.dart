@@ -1,57 +1,57 @@
 import 'package:flutter/material.dart';
 import '../../models/report_models.dart';
 
-class ProfitsReport extends StatelessWidget {
-  final List<ProfitReportData> data;
+class ActualProfitsReport extends StatelessWidget {
+  final List<ActualProfitReportData> data;
 
-  const ProfitsReport({super.key, required this.data});
+  const ActualProfitsReport({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {
     // حساب الإجماليات
     final totalSales = data.fold(0.0, (sum, item) => sum + item.sales);
-    final totalPurchases = data.fold(0.0, (sum, item) => sum + item.purchases);
-    final totalProfit = data.fold(0.0, (sum, item) => sum + item.profit);
-    final profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+    final totalCostOfGoodsSold = data.fold(
+      0.0,
+      (sum, item) => sum + item.costOfGoodsSold,
+    );
+    final totalActualProfit = data.fold(
+      0.0,
+      (sum, item) => sum + item.actualProfit,
+    );
+    final avgProfitMargin =
+        totalSales > 0 ? (totalActualProfit / totalSales) * 100 : 0;
 
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.blue[100]!),
+        side: BorderSide(color: Colors.green[100]!),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // العنوان مع ملاحظة
+            // العنوان
             Row(
               children: [
-                Icon(Icons.bar_chart, color: Colors.blue[800]),
+                Icon(Icons.attach_money, color: Colors.green[800]),
                 const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    "تقرير الأرباح (بسيط: المبيعات - المشتريات)",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
+                const Text(
+                  "تقرير الربح الفعلي",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "ملاحظة: هذا التقرير يحسب الربح عن طريق طرح المشتريات من المبيعات",
-              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
 
             // بطاقة ملخص الأرباح
             Card(
-              color: Colors.blue[50],
+              color: Colors.green[50],
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -74,11 +74,11 @@ class ProfitsReport extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          'إجمالي المشتريات:',
+                          'تكلفة البضاعة المباعة:',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          '${totalPurchases.toStringAsFixed(2)} شيكل',
+                          '${totalCostOfGoodsSold.toStringAsFixed(2)} شيكل',
                           style: const TextStyle(color: Colors.red),
                         ),
                       ],
@@ -88,17 +88,20 @@ class ProfitsReport extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          'صافي الربح:',
+                          'الربح الفعلي:',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
                         Text(
-                          '${totalProfit.toStringAsFixed(2)} شيكل',
+                          '${totalActualProfit.toStringAsFixed(2)} شيكل',
                           style: TextStyle(
                             fontSize: 16,
-                            color: totalProfit >= 0 ? Colors.green : Colors.red,
+                            color:
+                                totalActualProfit >= 0
+                                    ? Colors.green
+                                    : Colors.red,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -109,14 +112,16 @@ class ProfitsReport extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          'هامش الربح:',
+                          'متوسط هامش الربح:',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          '${profitMargin.toStringAsFixed(1)}%',
+                          '${avgProfitMargin.toStringAsFixed(1)}%',
                           style: TextStyle(
                             color:
-                                profitMargin >= 0 ? Colors.green : Colors.red,
+                                avgProfitMargin >= 0
+                                    ? Colors.green
+                                    : Colors.red,
                           ),
                         ),
                       ],
@@ -135,8 +140,9 @@ class ProfitsReport extends StatelessWidget {
                 columns: const [
                   DataColumn(label: Text("التاريخ")),
                   DataColumn(label: Text("المبيعات")),
-                  DataColumn(label: Text("المشتريات")),
-                  DataColumn(label: Text("صافي الربح")),
+                  DataColumn(label: Text("التكلفة")),
+                  DataColumn(label: Text("الربح الفعلي")),
+                  DataColumn(label: Text("هامش الربح %")),
                 ],
                 rows:
                     data.map((item) {
@@ -151,19 +157,30 @@ class ProfitsReport extends StatelessWidget {
                           ),
                           DataCell(
                             Text(
-                              "${item.purchases.toStringAsFixed(2)} شيكل",
+                              "${item.costOfGoodsSold.toStringAsFixed(2)} شيكل",
                               style: const TextStyle(color: Colors.red),
                             ),
                           ),
                           DataCell(
                             Text(
-                              "${item.profit.toStringAsFixed(2)} شيكل",
+                              "${item.actualProfit.toStringAsFixed(2)} شيكل",
                               style: TextStyle(
                                 color:
-                                    item.profit >= 0
+                                    item.actualProfit >= 0
                                         ? Colors.green
                                         : Colors.red,
                                 fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              "${item.profitMargin.toStringAsFixed(1)}%",
+                              style: TextStyle(
+                                color:
+                                    item.profitMargin >= 0
+                                        ? Colors.green
+                                        : Colors.red,
                               ),
                             ),
                           ),

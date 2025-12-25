@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pos_desktop/database/category_queries.dart';
 import 'package:pos_desktop/dialogs/quick_add_category_dialog.dart';
 import 'package:pos_desktop/models/category.dart';
 import 'package:pos_desktop/models/product.dart';
@@ -124,66 +125,53 @@ class _ProductDialogState extends State<ProductDialog> {
     });
   }
 
-  // ← دالة لفتح نافذة إضافة فئة سريعة
   void _openQuickAddCategory() async {
     final newCategory = await showDialog<Category>(
       context: context,
       builder:
-          (context) =>
-              QuickAddCategoryDialog(existingCategories: _localCategories),
+          (context) => QuickAddCategoryDialog(
+            existingCategories: _localCategories,
+            addToDatabase: true, // ✅ تأكد من تمرير true هنا
+          ),
     );
 
     if (newCategory != null) {
-      // تأكد من عدم وجود فئات مكررة بنفس ID
-      int newId;
-      if (_localCategories.isEmpty) {
-        newId = 1;
-      } else {
-        // البحث عن أكبر ID موجود وإضافة 1 له
-        final maxId = _localCategories
-            .where((c) => c.id != null)
-            .map((c) => c.id!)
-            .fold<int>(0, (prev, id) => id > prev ? id : prev);
-        newId = maxId + 1;
-      }
-
-      final newCategoryWithId = Category(
-        id: newId,
-        name: newCategory.name,
-        description: newCategory.description,
-        color: newCategory.color,
-      );
-
-      // التحقق من عدم وجود فئة بنفس ID بالفعل
-      bool idExists = _localCategories.any((c) => c.id == newId);
-      if (idExists) {
-        TopAlert.showError(
-          context: context,
-          message: "حدث خطأ: يوجد فئة بنفس المعرف مسبقاً",
-        );
-        return;
-      }
-
-      // إضافة الفئة الجديدة إلى القائمة
+      // 1. تحديث القائمة المحلية
       setState(() {
-        _localCategories.add(newCategoryWithId);
+        _localCategories.add(newCategory);
       });
 
-      // اختيار الفئة الجديدة تلقائياً
+      // 2. اختيار الفئة الجديدة تلقائياً
       setState(() {
-        _selectedCategoryId = newCategoryWithId.id;
-        _selectedCategoryName = newCategoryWithId.name;
+        _selectedCategoryId = newCategory.id;
+        _selectedCategoryName = newCategory.name;
       });
 
-      // إعلام الوالد بالتحديث
+      // 3. إعادة تحميل القائمة من قاعدة البيانات للتأكد
+      await _refreshCategoriesFromDatabase();
+
+      // 4. إعلام الوالد بالتحديث
       if (widget.onCategoriesUpdate != null) {
         widget.onCategoriesUpdate!(_localCategories);
       }
 
       TopAlert.showSuccess(
         context: context,
-        message: "تمت إضافة الفئة '${newCategoryWithId.name}' بنجاح",
+        message: "تمت إضافة الفئة '${newCategory.name}' بنجاح",
       );
+    }
+  }
+
+  Future<void> _refreshCategoriesFromDatabase() async {
+    try {
+      final categoryQueries = CategoryQueries();
+      final updatedCategories = await categoryQueries.getAllCategories();
+
+      setState(() {
+        _localCategories = updatedCategories;
+      });
+    } catch (e) {
+      print('خطأ في تحديث قائمة الفئات: $e');
     }
   }
 
@@ -330,7 +318,20 @@ class _ProductDialogState extends State<ProductDialog> {
           ],
         ),
 
-        // --- تم نقل قسم الباركودات الإضافية هنا (خارج الـ TextFormField والـ Row) ---
+        // -------------------------------------------------------------------
+        const SizedBox(height: 20),
+        TextFormField(
+          controller: _barcodeController,
+          decoration: InputDecoration(
+            labelText: "باركود الوحدة الأساسية (الرئيسي)",
+            prefixIcon: const Icon(Icons.qr_code_2_outlined),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.sync),
+              onPressed: _generateBarcode,
+            ),
+          ),
+        ),
         const SizedBox(height: 20),
 
         Container(
@@ -416,21 +417,6 @@ class _ProductDialogState extends State<ProductDialog> {
                   },
                 ),
             ],
-          ),
-        ),
-
-        // -------------------------------------------------------------------
-        const SizedBox(height: 20),
-        TextFormField(
-          controller: _barcodeController,
-          decoration: InputDecoration(
-            labelText: "باركود الوحدة الأساسية (الرئيسي)",
-            prefixIcon: const Icon(Icons.qr_code_2_outlined),
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.sync),
-              onPressed: _generateBarcode,
-            ),
           ),
         ),
         const SizedBox(height: 20),

@@ -4,7 +4,7 @@ import '../components/sales_interface.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
 import '../components/reports_section.dart';
-import '../components/debtors_page.dart'; // <-- الخطوة 1: استيراد الصفحة الجديدة
+import '../components/customers_and_suppliers_page.dart'; // <-- Modified
 
 class IndexPage extends StatefulWidget {
   const IndexPage({super.key});
@@ -23,7 +23,7 @@ class _IndexPageState extends State<IndexPage> {
     const SalesInvoices(),
     const PurchaseInvoices(),
     const ReportsSection(),
-    const DebtorsPage(), // <-- أضف هذا السطر
+    const CustomersAndSuppliersPage(), // <-- Modified
   ];
 
   // الخطوة 3: إضافة عنوان الصفحة الجديدة
@@ -33,7 +33,7 @@ class _IndexPageState extends State<IndexPage> {
     'فواتير المبيعات',
     'فواتير الشراء',
     'التقارير',
-    'العملاء والديون', // <-- أضف هذا السطر
+    'العملاء والموردين', // <-- Modified
   ];
 
   // الخطوة 4: إضافة أيقونة الصفحة الجديدة
@@ -43,7 +43,7 @@ class _IndexPageState extends State<IndexPage> {
     Icons.receipt_long_outlined,
     Icons.shopping_bag_outlined,
     Icons.analytics_outlined,
-    Icons.people_alt_outlined, // <-- أضف هذا السطر
+    Icons.people_alt_outlined,
   ];
 
   @override

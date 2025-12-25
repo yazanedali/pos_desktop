@@ -76,12 +76,13 @@ class CustomerQueries {
       c.name as customerName,
       c.phone as phone,
       c.address as address,
-      -- فقط اجمع المبالغ المتبقية من كل الفواتير (بما في ذلك فاتورة الدين الافتتاحي)
+      c.wallet_balance as walletBalance, -- <-- جلب الرصيد
+      -- فقط اجمع المبالغ المتبقية من كل الفواتير
       COALESCE(SUM(si.remaining_amount), 0) as totalDebt
     FROM customers c
     LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.remaining_amount > 0
     WHERE $whereClause
-    GROUP BY c.id, c.name, c.phone, c.address
+    GROUP BY c.id, c.name, c.phone, c.address, c.wallet_balance
     ORDER BY totalDebt DESC, c.name ASC
   ''', whereArgs);
 
@@ -377,6 +378,25 @@ class CustomerQueries {
       creditTotal: (creditSales.first['total'] as num).toDouble(),
       paymentRecordsCount: paymentRecords.first['count'] as int,
       paymentRecordsTotal: (paymentRecords.first['total'] as num).toDouble(),
+    );
+  }
+
+  // تحديث رصيد المحفظة للعميل
+  Future<void> updateCustomerWallet(int customerId, double amount,
+      {bool isDeposit = true}) async {
+    final db = await _dbHelper.database;
+    final customer = await getCustomerById(customerId);
+    if (customer == null) return;
+
+    double currentBalance = customer.walletBalance;
+    double newBalance =
+        isDeposit ? currentBalance + amount : currentBalance - amount;
+
+    await db.update(
+      'customers',
+      {'wallet_balance': newBalance},
+      where: 'id = ?',
+      whereArgs: [customerId],
     );
   }
 }

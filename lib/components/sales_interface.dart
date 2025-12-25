@@ -464,8 +464,9 @@ class _SalesInterfaceState extends State<SalesInterface> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // المنتجات (50% من الشاشة)
           Expanded(
-            flex: 2,
+            flex: 2, // كان 2
             child: Column(
               children: [
                 BarcodeReader(
@@ -478,7 +479,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
                     products: _products,
                     categories: _categories,
                     onProductAdded: _addToCart,
-                    // إضافة خصائص Lazy Loading
                     hasMore: _hasMore,
                     isLoadingMore: _isLoadingMore,
                     onLoadMore: _loadMoreProducts,
@@ -493,8 +493,9 @@ class _SalesInterfaceState extends State<SalesInterface> {
             ),
           ),
           const SizedBox(width: 16),
+          // السلة (50% من الشاشة)
           Expanded(
-            flex: 1,
+            flex: 2, // كان 1 - تغييرها لـ 2 لتكون 50%-50%
             child: ShoppingCart(
               cartItems: _cartItems,
               products: _products,

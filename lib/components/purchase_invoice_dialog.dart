@@ -4,6 +4,8 @@ import '../database/product_queries.dart';
 import '../models/category.dart';
 import '../models/purchase_invoice.dart';
 import '../models/product.dart';
+import '../models/supplier.dart'; // <-- Added
+import '../database/supplier_queries.dart'; // <-- Added
 import '../widgets/top_alert.dart';
 import './product_dialog.dart'; // ← استيراد نافذة المنتج
 
@@ -28,12 +30,19 @@ class PurchaseInvoiceDialog extends StatefulWidget {
 }
 
 class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late TextEditingController _supplierController;
   late TextEditingController _dateController;
   List<PurchaseInvoiceItem> _invoiceItems = [];
   bool get _isEditMode => widget.invoiceToEdit != null;
   late String _generatedInvoiceNumber;
+
+  final ProductQueries _productQueries = ProductQueries();
+  // Supplier & Payment Logic
+  final SupplierQueries _supplierQueries = SupplierQueries();
+  List<Supplier> _suppliers = [];
+  Supplier? _selectedSupplier;
+  String _paymentStatus = 'مدفوع'; // مدفوع، جزئي، غير مدفوع
+  double _paidAmount = 0.0;
+  final TextEditingController _paidAmountController = TextEditingController();
 
   final List<TextEditingController> _productNameControllers = [];
   final List<TextEditingController> _barcodeControllers = [];
@@ -44,45 +53,58 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   late TextEditingController _searchController;
   List<Product> _products = [];
   bool _isLoadingProducts = false;
-  String _searchFilter = 'الكل'; // 'الكل'، 'الاسم'، 'الباركود'، 'الفئة'
+  String _searchFilter = 'الكل';
   String _searchTerm = '';
 
   @override
   void initState() {
     super.initState();
-    _supplierController = TextEditingController();
     _dateController = TextEditingController();
     _searchController = TextEditingController();
+    _loadSuppliers();
 
     if (_isEditMode) {
       final invoice = widget.invoiceToEdit!;
       _generatedInvoiceNumber = invoice.invoiceNumber;
-      _supplierController.text = invoice.supplier;
       _dateController.text = invoice.date;
       _invoiceItems = List<PurchaseInvoiceItem>.from(invoice.items);
+      _paymentStatus = invoice.paymentStatus;
+      _paidAmount = invoice.paidAmount;
+      _paidAmountController.text = _paidAmount.toString();
+      // Note: Supplier selection logic will run after `_loadSuppliers`
     } else {
       _generatedInvoiceNumber =
           'INV-${const Uuid().v4().substring(0, 8).toUpperCase()}';
       _dateController.text = _getTodayDate();
+      _paidAmountController.text = '0';
     }
     _initializeControllers();
-
     _loadProducts();
   }
 
-  Future<void> _loadProducts({String searchTerm = ''}) async {
-    setState(() => _isLoadingProducts = true);
+  Future<void> _loadSuppliers() async {
+    final suppliers = await _supplierQueries.getAllSuppliers();
+    setState(() {
+      _suppliers = suppliers;
+      if (_isEditMode && widget.invoiceToEdit?.supplierId != null) {
+        try {
+          _selectedSupplier = _suppliers.firstWhere(
+            (s) => s.id == widget.invoiceToEdit!.supplierId,
+          );
+        } catch (_) {}
+      }
+    });
+  }
 
-    try {
-      final products = await ProductQueries().getProductsForPurchase(
-        searchTerm: searchTerm.isEmpty ? null : searchTerm,
-      );
-      setState(() => _products = products);
-    } catch (e) {
-      TopAlert.showError(context: context, message: 'خطأ في جلب المنتجات: $e');
-    } finally {
-      setState(() => _isLoadingProducts = false);
-    }
+  final _formKey = GlobalKey<FormState>();
+
+  Future<void> _loadProducts() async {
+    setState(() => _isLoadingProducts = true);
+    final products = await ProductQueries().getAllProducts();
+    setState(() {
+      _products = products;
+      _isLoadingProducts = false;
+    });
   }
 
   void _searchProducts() {
@@ -91,81 +113,45 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       return;
     }
 
-    setState(() => _isLoadingProducts = true);
+    setState(() {
+      _products =
+          _products.where((product) {
+            final term = _searchTerm.toLowerCase();
+            final nameMatch = product.name.toLowerCase().contains(term);
+            final barcodeMatch =
+                product.barcode?.toLowerCase().contains(term) ?? false;
 
-    switch (_searchFilter) {
-      case 'الكل':
-        _loadProducts(searchTerm: _searchTerm);
-        break;
-      case 'الاسم':
-        _searchProductsByName();
-        break;
-      case 'الباركود':
-        _searchProductsByBarcode();
-        break;
-      case 'الفئة':
-        _searchProductsByCategory();
-        break;
-    }
+            if (_searchFilter == 'الاسم') return nameMatch;
+            if (_searchFilter == 'الباركود') return barcodeMatch;
+            if (_searchFilter == 'الفئة') {
+              final categoryName =
+                  widget.categories
+                      .firstWhere(
+                        (c) => c.id == product.categoryId,
+                        orElse: () => Category(id: 0, name: '', color: ''),
+                      )
+                      .name
+                      .toLowerCase();
+              return categoryName.contains(term);
+            }
+            return nameMatch || barcodeMatch;
+          }).toList();
+    });
   }
 
-  Future<void> _searchProductsByName() async {
-    try {
-      final allProducts = await ProductQueries().getAllProducts();
-      final filteredProducts =
-          allProducts
-              .where(
-                (product) => product.name.toLowerCase().contains(
-                  _searchTerm.toLowerCase(),
-                ),
-              )
-              .toList();
-      setState(() => _products = filteredProducts);
-    } catch (e) {
-      TopAlert.showError(context: context, message: 'خطأ في البحث: $e');
-    } finally {
-      setState(() => _isLoadingProducts = false);
-    }
+  String _getTodayDate() {
+    final now = DateTime.now();
+    return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  Future<void> _searchProductsByBarcode() async {
-    try {
-      final product = await ProductQueries().getProductByBarcode(_searchTerm);
-      setState(() => _products = product != null ? [product] : []);
-    } catch (e) {
-      TopAlert.showError(context: context, message: 'خطأ في البحث: $e');
-    } finally {
-      setState(() => _isLoadingProducts = false);
-    }
-  }
-
-  Future<void> _searchProductsByCategory() async {
-    try {
-      final allProducts = await ProductQueries().getAllProducts();
-      final filteredProducts =
-          allProducts
-              .where(
-                (product) => widget.categories
-                    .firstWhere(
-                      (c) => c.id == product.categoryId,
-                      orElse: () => Category(id: 0, name: '', color: ''),
-                    )
-                    .name
-                    .toLowerCase()
-                    .contains(_searchTerm.toLowerCase()),
-              )
-              .toList();
-      setState(() => _products = filteredProducts);
-    } catch (e) {
-      TopAlert.showError(context: context, message: 'خطأ في البحث: $e');
-    } finally {
-      setState(() => _isLoadingProducts = false);
-    }
+  String _getCurrentTime() {
+    final now = DateTime.now();
+    return "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
   }
 
   void _initializeControllers() {
-    _disposeItemControllers();
-    for (final item in _invoiceItems) {
+    // Initialize controllers for existing items when editing
+    for (var item in _invoiceItems) {
       _productNameControllers.add(
         TextEditingController(text: item.productName),
       );
@@ -184,160 +170,130 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
 
   @override
   void dispose() {
-    _supplierController.dispose();
     _dateController.dispose();
     _searchController.dispose();
-    _disposeItemControllers();
+    _paidAmountController.dispose();
+    for (var controller in _quantityControllers) controller.dispose();
+    for (var controller in _purchasePriceControllers) controller.dispose();
+    for (var controller in _salePriceControllers) controller.dispose();
     super.dispose();
   }
 
-  void _disposeItemControllers() {
-    for (var c in _productNameControllers) c.dispose();
-    for (var c in _barcodeControllers) c.dispose();
-    for (var c in _quantityControllers) c.dispose();
-    for (var c in _purchasePriceControllers) c.dispose();
-    for (var c in _salePriceControllers) c.dispose();
-    _productNameControllers.clear();
-    _barcodeControllers.clear();
-    _quantityControllers.clear();
-    _purchasePriceControllers.clear();
-    _salePriceControllers.clear();
-  }
-
-  String _getTodayDate() {
-    final now = DateTime.now();
-    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-  }
-
-  String _getCurrentTime() {
-    final now = DateTime.now();
-    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-  }
-
   void _addProductToInvoice(Product product) {
-    final existingIndex = _invoiceItems.indexWhere(
-      (item) =>
-          item.productName == product.name ||
-          (item.barcode.isNotEmpty && item.barcode == product.barcode),
-    );
-
-    if (existingIndex != -1) {
-      setState(() {
-        final existingItem = _invoiceItems[existingIndex];
-        _invoiceItems[existingIndex] = existingItem.copyWith(
-          quantity: existingItem.quantity + 1,
-        );
-        _quantityControllers[existingIndex].text =
-            _invoiceItems[existingIndex].quantity.toString();
-      });
-      TopAlert.showSuccess(
+    if (_invoiceItems.any((item) => item.productName == product.name)) {
+      TopAlert.showError(
         context: context,
-        message: 'تم زيادة كمية المنتج ${product.name}',
+        message: 'المنتج موجود بالفعل في الفاتورة',
       );
-    } else {
-      final category = widget.categories.firstWhere(
-        (c) => c.id == product.categoryId,
-        orElse: () => Category(id: 0, name: 'غير معروف', color: '#000000'),
-      );
-
-      setState(() {
-        _invoiceItems.add(
-          PurchaseInvoiceItem(
-            productName: product.name,
-            barcode: product.barcode ?? '',
-            quantity: 1.0,
-            purchasePrice: product.price,
-            salePrice: product.price,
-            category: category.name,
-            total: product.price,
-          ),
-        );
-        _productNameControllers.add(TextEditingController(text: product.name));
-        _barcodeControllers.add(
-          TextEditingController(text: product.barcode ?? ''),
-        );
-        _quantityControllers.add(TextEditingController(text: '1'));
-        _purchasePriceControllers.add(
-          TextEditingController(text: product.price.toString()),
-        );
-        _salePriceControllers.add(
-          TextEditingController(text: product.price.toString()),
-        );
-      });
+      return;
     }
+
+    setState(() {
+      final newItem = PurchaseInvoiceItem(
+        id: null,
+        // invoiceId parameter removed
+        productName: product.name,
+        barcode: product.barcode ?? '',
+        quantity: 1,
+        purchasePrice: product.purchasePrice,
+        salePrice: product.price,
+        total: product.purchasePrice,
+        category:
+            widget.categories
+                .firstWhere(
+                  (c) => c.id == product.categoryId,
+                  orElse: () => Category(id: 0, name: '', color: ''),
+                )
+                .name,
+      );
+      _invoiceItems.add(newItem);
+
+      _quantityControllers.add(TextEditingController(text: "1"));
+      _purchasePriceControllers.add(
+        TextEditingController(text: product.purchasePrice.toString()),
+      );
+      _salePriceControllers.add(
+        TextEditingController(text: product.price.toString()),
+      );
+    });
   }
 
   void _removeInvoiceItem(int index) {
     setState(() {
-      _productNameControllers[index].dispose();
-      _barcodeControllers[index].dispose();
+      _invoiceItems.removeAt(index);
       _quantityControllers[index].dispose();
       _purchasePriceControllers[index].dispose();
       _salePriceControllers[index].dispose();
 
-      _invoiceItems.removeAt(index);
-      _productNameControllers.removeAt(index);
-      _barcodeControllers.removeAt(index);
       _quantityControllers.removeAt(index);
       _purchasePriceControllers.removeAt(index);
       _salePriceControllers.removeAt(index);
     });
   }
 
-  void _updateInvoiceItem(int index, String field, dynamic value) {
+  void _updateInvoiceItem(int index, String field, double value) {
     setState(() {
       final item = _invoiceItems[index];
-      final updatedItem = item.copyWith(
-        productName: field == 'productName' ? value : item.productName,
-        barcode: field == 'barcode' ? value : item.barcode,
-        quantity: field == 'quantity' ? value : item.quantity,
-        purchasePrice: field == 'purchasePrice' ? value : item.purchasePrice,
-        salePrice: field == 'salePrice' ? value : item.salePrice,
-        category: field == 'category' ? value : item.category,
-      );
-      _invoiceItems[index] = updatedItem.copyWith(
-        total: updatedItem.quantity * updatedItem.purchasePrice,
-      );
+      PurchaseInvoiceItem newItem;
+
+      switch (field) {
+        case 'quantity':
+          newItem = item.copyWith(
+            quantity: value,
+            total: value * item.purchasePrice,
+          );
+          break;
+        case 'purchasePrice':
+          newItem = item.copyWith(
+            purchasePrice: value,
+            total: item.quantity * value,
+          );
+          break;
+        case 'salePrice':
+          newItem = item.copyWith(salePrice: value);
+          break;
+        default:
+          return;
+      }
+      _invoiceItems[index] = newItem;
     });
   }
 
-  // دالة لفتح نافذة إضافة منتج جديد
-  void _openAddProductDialog() async {
-    final newProduct = await showDialog<Product>(
+  Future<void> _openAddProductDialog() async {
+    await showDialog(
       context: context,
       builder:
           (context) => ProductDialog(
             categories: widget.categories,
-            onSave: (product) {
-              Navigator.of(context).pop(product); // إرجاع المنتج الجديد
+            onSave: (product) async {
+              // 1️⃣ حفظ المنتج في جدول المنتجات
+              final savedProduct = await _productQueries.createProduct(product);
+
+              // 2️⃣ إعادة تحميل المنتجات
+              await _loadProducts();
+
+              // 3️⃣ إضافة المنتج للفاتورة
+              _addProductToInvoice(savedProduct);
+
+              // 4️⃣ إغلاق نافذة المنتج
+              Navigator.pop(context);
+
+              if (widget.onProductAdded != null) {
+                widget.onProductAdded!();
+              }
             },
-            onCancel: () {
-              Navigator.of(context).pop(); // إغلاق بدون إرجاع
-            },
+
+            onCancel: () => Navigator.pop(context),
           ),
     );
-
-    if (newProduct != null) {
-      // إضافة المنتج الجديد إلى الفاتورة تلقائياً
-      _addProductToInvoice(newProduct);
-
-      // إعادة تحميل قائمة المنتجات لتظهر المنتج الجديد
-      await _loadProducts();
-
-      // إظهار رسالة نجاح
-      TopAlert.showSuccess(
-        context: context,
-        message: 'تم إضافة المنتج "${newProduct.name}" بنجاح وإضافته للفاتورة',
-      );
-    }
   }
 
   double _calculateTotal() =>
       _invoiceItems.fold(0, (total, item) => total + item.total);
 
   void _submitForm() {
-    if (_supplierController.text.isEmpty) {
-      TopAlert.showError(context: context, message: 'يرجى إدخال اسم المورد');
+    if (_selectedSupplier == null) {
+      TopAlert.showError(context: context, message: 'يرجى اختيار المورد');
       return;
     }
 
@@ -347,6 +303,29 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
         message: 'يرجى إضافة منتجات إلى الفاتورة',
       );
       return;
+    }
+
+    final total = _calculateTotal();
+    double paid = 0.0;
+    double remaining = 0.0;
+
+    if (_paymentStatus == 'مدفوع') {
+      paid = total;
+      remaining = 0;
+    } else if (_paymentStatus == 'غير مدفوع') {
+      paid = 0;
+      remaining = total;
+    } else {
+      // جزئي
+      paid = double.tryParse(_paidAmountController.text) ?? 0.0;
+      if (paid > total) {
+        TopAlert.showError(
+          context: context,
+          message: 'المبلغ المدفوع أكبر من الإجمالي',
+        );
+        return;
+      }
+      remaining = total - paid;
     }
 
     final validItems =
@@ -369,11 +348,16 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     final invoice = PurchaseInvoice(
       id: widget.invoiceToEdit?.id,
       invoiceNumber: _generatedInvoiceNumber,
-      supplier: _supplierController.text,
+      supplier: _selectedSupplier!.name,
+      supplierId: _selectedSupplier!.id,
       date: _dateController.text,
       time: _isEditMode ? widget.invoiceToEdit!.time : _getCurrentTime(),
       items: validItems,
-      total: _calculateTotal(),
+      total: total,
+      paymentStatus: _paymentStatus,
+      paymentType: _paymentStatus == 'غير مدفوع' ? 'آجل' : 'نقدي', // تبسيط
+      paidAmount: paid,
+      remainingAmount: remaining,
     );
 
     widget.onSave(invoice);
@@ -787,18 +771,24 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: TextFormField(
-                      controller: _supplierController,
+                    child: DropdownButtonFormField<Supplier>(
+                      value: _selectedSupplier,
                       decoration: const InputDecoration(
                         labelText: "المورد *",
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.business_center_outlined),
                       ),
-                      validator:
-                          (v) =>
-                              (v == null || v.isEmpty)
-                                  ? "يرجى إدخال اسم المورد"
-                                  : null,
+                      items:
+                          _suppliers.map((s) {
+                            return DropdownMenuItem(
+                              value: s,
+                              child: Text(s.name),
+                            );
+                          }).toList(),
+                      onChanged: (val) {
+                        setState(() => _selectedSupplier = val);
+                      },
+                      validator: (val) => val == null ? "مطلوب" : null,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -825,6 +815,55 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       },
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      value: _paymentStatus,
+                      decoration: const InputDecoration(
+                        labelText: "حالة الدفع",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'مدفوع',
+                          child: Text("مدفوع كامل"),
+                        ),
+                        DropdownMenuItem(
+                          value: 'جزئي',
+                          child: Text("مدفوع جزئي"),
+                        ),
+                        DropdownMenuItem(
+                          value: 'غير مدفوع',
+                          child: Text("آجل (دين)"),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _paymentStatus = val!;
+                        });
+                      },
+                    ),
+                  ),
+                  if (_paymentStatus == 'جزئي') ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 1,
+                      child: TextFormField(
+                        controller: _paidAmountController,
+                        decoration: const InputDecoration(
+                          labelText: "المبلغ المدفوع",
+                          border: OutlineInputBorder(),
+                          suffixText: "شيكل",
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 20),

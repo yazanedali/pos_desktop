@@ -7,6 +7,12 @@ class PurchaseInvoice {
   final List<PurchaseInvoiceItem> items;
   final double total;
   final String? createdAt;
+  final int? supplierId;
+  final String paymentStatus; // 'مدفوع', 'جزئي', 'غير مدفوع'
+  final double paidAmount;
+  final double remainingAmount;
+  final String paymentType; // 'نقدي', 'آجل', 'من الرصيد'
+  final String? notes;
 
   PurchaseInvoice({
     this.id,
@@ -17,6 +23,12 @@ class PurchaseInvoice {
     required this.items,
     required this.total,
     this.createdAt,
+    this.supplierId,
+    this.paymentStatus = 'مدفوع',
+    this.paidAmount = 0.0,
+    this.remainingAmount = 0.0,
+    this.paymentType = 'نقدي',
+    this.notes,
   });
 
   Map<String, dynamic> toMap() {
@@ -28,6 +40,12 @@ class PurchaseInvoice {
       'time': time,
       'total': total,
       'created_at': createdAt,
+      'supplier_id': supplierId,
+      'payment_status': paymentStatus,
+      'paid_amount': paidAmount,
+      'remaining_amount': remainingAmount,
+      'payment_type': paymentType,
+      'notes': notes,
     };
   }
 
@@ -39,8 +57,14 @@ class PurchaseInvoice {
       date: map['date'] as String,
       time: map['time'] as String,
       items: [],
-      total: (map['total'] as num).toDouble(), // <-- التحويل الآمن
+      total: (map['total'] as num).toDouble(),
       createdAt: map['created_at'] as String?,
+      supplierId: map['supplier_id'] as int?,
+      paymentStatus: map['payment_status'] ?? 'مدفوع',
+      paidAmount: (map['paid_amount'] as num?)?.toDouble() ?? 0.0,
+      remainingAmount: (map['remaining_amount'] as num?)?.toDouble() ?? 0.0,
+      paymentType: map['payment_type'] ?? 'نقدي',
+      notes: map['notes'] as String?,
     );
   }
 
@@ -53,6 +77,12 @@ class PurchaseInvoice {
     List<PurchaseInvoiceItem>? items,
     double? total,
     String? createdAt,
+    int? supplierId,
+    String? paymentStatus,
+    double? paidAmount,
+    double? remainingAmount,
+    String? paymentType,
+    String? notes,
   }) {
     return PurchaseInvoice(
       id: id ?? this.id,
@@ -63,6 +93,12 @@ class PurchaseInvoice {
       items: items ?? this.items,
       total: total ?? this.total,
       createdAt: createdAt ?? this.createdAt,
+      supplierId: supplierId ?? this.supplierId,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paidAmount: paidAmount ?? this.paidAmount,
+      remainingAmount: remainingAmount ?? this.remainingAmount,
+      paymentType: paymentType ?? this.paymentType,
+      notes: notes ?? this.notes,
     );
   }
 }

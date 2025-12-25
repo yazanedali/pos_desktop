@@ -1,16 +1,19 @@
 // lib/widgets/quick_add_category_dialog.dart
 import 'package:flutter/material.dart';
 import '../models/category.dart';
+import '../database/category_queries.dart';
 import '../widgets/top_alert.dart';
 
 class QuickAddCategoryDialog extends StatefulWidget {
   final Function(Category)? onCategoryAdded;
   final List<Category> existingCategories;
+  final bool addToDatabase; // إضافة معلمة جديدة
 
   const QuickAddCategoryDialog({
     super.key,
     this.onCategoryAdded,
     required this.existingCategories,
+    this.addToDatabase = true, // القيمة الافتراضية: نعم
   });
 
   @override
@@ -20,7 +23,9 @@ class QuickAddCategoryDialog extends StatefulWidget {
 class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  final CategoryQueries _categoryQueries = CategoryQueries();
   String _selectedColor = "#3B82F6";
+  bool _isSaving = false;
 
   final List<String> _colors = [
     "#3B82F6",
@@ -56,7 +61,7 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
     return Color(int.parse(hex, radix: 16));
   }
 
-  void _submitForm() {
+  Future<void> _submitForm() async {
     final categoryName = _nameController.text.trim();
     if (categoryName.isEmpty) {
       TopAlert.showError(context: context, message: "يرجى إدخال اسم الفئة");
@@ -73,6 +78,76 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
       return;
     }
 
+    if (widget.addToDatabase) {
+      // ✅ إضافة الفئة إلى قاعدة البيانات
+      await _addToDatabase(categoryName);
+    } else {
+      // ❌ الطريقة القديمة (إضافة في الذاكرة فقط)
+      _addToMemory(categoryName);
+    }
+  }
+
+  Future<void> _addToDatabase(String categoryName) async {
+    setState(() => _isSaving = true);
+
+    try {
+      // 1. التحقق من عدم وجود الفئة في قاعدة البيانات
+      final isNameExists = await _categoryQueries.isCategoryNameExists(
+        categoryName,
+      );
+
+      if (isNameExists) {
+        TopAlert.showError(
+          context: context,
+          message: "فئة '$categoryName' موجودة مسبقاً في قاعدة البيانات",
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
+
+      // 2. إنشاء كائن الفئة
+      final newCategory = Category(
+        name: categoryName,
+        description:
+            _descriptionController.text.trim().isEmpty
+                ? null
+                : _descriptionController.text.trim(),
+        color: _selectedColor,
+      );
+
+      // 3. إضافة الفئة إلى قاعدة البيانات
+      final insertedId = await _categoryQueries.insertCategory(newCategory);
+
+      // 4. إنشاء الفئة مع ID الحقيقي
+      final savedCategory = newCategory.copyWith(id: insertedId);
+
+      // 5. إعلام الوالد بالتحديث
+      if (widget.onCategoryAdded != null) {
+        widget.onCategoryAdded!(savedCategory);
+      }
+
+      // 6. إغلاق الديالوغ وإرجاع الفئة
+      if (context.mounted) {
+        Navigator.of(context).pop(savedCategory);
+      }
+
+      TopAlert.showSuccess(
+        context: context,
+        message: "تم إضافة فئة '$categoryName' إلى قاعدة البيانات",
+      );
+    } catch (e) {
+      if (context.mounted) {
+        TopAlert.showError(
+          context: context,
+          message: 'خطأ في إضافة الفئة إلى قاعدة البيانات: $e',
+        );
+      }
+      setState(() => _isSaving = false);
+    }
+  }
+
+  void _addToMemory(String categoryName) {
+    // الطريقة القديمة - إضافة في الذاكرة فقط
     final newCategory = Category(
       name: categoryName,
       description:
@@ -92,17 +167,12 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12), // أصغر قليلاً
-      ),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20), // هوامش جانبية
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: 400, // عرض ثابت
-          minWidth: 300, // عرض أدنى
-        ),
+        constraints: const BoxConstraints(maxWidth: 400, minWidth: 300),
         child: Padding(
-          padding: const EdgeInsets.all(20), // تباعد داخلي أقل
+          padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,7 +182,7 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
                 child: Text(
                   "إضافة فئة جديدة",
                   style: TextStyle(
-                    fontSize: 16, // حجم خط أصغر
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.blue[800],
                   ),
@@ -184,19 +254,21 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
 
               // شبكة الألوان
               Wrap(
-                spacing: 10, // تباعد أقل
+                spacing: 10,
                 runSpacing: 10,
                 alignment: WrapAlignment.center,
                 children:
                     _colors.map((color) {
                       return GestureDetector(
                         onTap: () {
-                          setState(() {
-                            _selectedColor = color;
-                          });
+                          if (!_isSaving) {
+                            setState(() {
+                              _selectedColor = color;
+                            });
+                          }
                         },
                         child: Container(
-                          width: 30, // أصغر قليلاً
+                          width: 30,
                           height: 30,
                           decoration: BoxDecoration(
                             color: _hexToColor(color),
@@ -230,16 +302,44 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
               ),
               const SizedBox(height: 20),
 
+              // إشعار حفظ قاعدة البيانات
+              if (widget.addToDatabase)
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[100]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.storage, size: 16, color: Colors.green[700]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "سيتم حفظ الفئة في قاعدة البيانات",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+
               // أزرار التحكم
               Row(
                 children: [
                   Expanded(
                     child: SizedBox(
-                      height: 44, // ارتفاع ثابت للأزرار
+                      height: 44,
                       child: ElevatedButton(
-                        onPressed: _submitForm,
+                        onPressed: _isSaving ? null : _submitForm,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[600],
+                          backgroundColor:
+                              _isSaving ? Colors.grey[400] : Colors.green[600],
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -247,13 +347,23 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
                           elevation: 0,
                           padding: EdgeInsets.zero,
                         ),
-                        child: const Text(
-                          "إضافة",
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        child:
+                            _isSaving
+                                ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                                : const Text(
+                                  "إضافة",
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                       ),
                     ),
                   ),
@@ -262,7 +372,10 @@ class _QuickAddCategoryDialogState extends State<QuickAddCategoryDialog> {
                     child: SizedBox(
                       height: 44,
                       child: OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed:
+                            _isSaving
+                                ? null
+                                : () => Navigator.of(context).pop(),
                         style: OutlinedButton.styleFrom(
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),

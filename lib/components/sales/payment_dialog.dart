@@ -361,6 +361,23 @@ class _PaymentDialogState extends State<PaymentDialog> {
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
+                     Expanded(
+                      child: RadioListTile<String>(
+                        title: const Text(
+                          'من الرصيد',
+                          style: TextStyle(fontSize: 15),
+                        ),
+                        value: 'من الرصيد',
+                        groupValue: _paymentMethod,
+                        onChanged: (value) {
+                          setState(() {
+                            _paymentMethod = value!;
+                            _paidAmountController.text = widget.totalAmount.toStringAsFixed(2);
+                          });
+                        },
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
@@ -395,11 +412,16 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     if (paid < 0) {
                       return 'المبلغ لا يمكن أن يكون سالباً';
                     }
+                    if (_paymentMethod == 'من الرصيد' && _selectedCustomer != null) {
+                         if (paid > _selectedCustomer!.walletBalance) {
+                           return 'رصيد العميل غير كافي';
+                         }
+                    }
                     return null;
                   },
                 ),
 
-                if (_paymentMethod == 'آجل') ...[
+                if (_paymentMethod == 'آجل' || _paymentMethod == 'من الرصيد') ...[
                   const SizedBox(height: 20),
                   const Text(
                     'اختر العميل:',
@@ -410,7 +432,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
                   // استخدام القائمة المنسدلة مع البحث
                   _buildSearchableDropdown(),
 
-                  // عرض العميل المختار
                   if (_selectedCustomer != null) ...[
                     const SizedBox(height: 16),
                     Container(
@@ -420,45 +441,68 @@ class _PaymentDialogState extends State<PaymentDialog> {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: Colors.green.shade200),
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          const Icon(
-                            Icons.check_circle,
-                            color: Colors.green,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _selectedCustomer!.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                if (_selectedCustomer!.phone != null)
-                                  Text(
-                                    _selectedCustomer!.phone!,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.grey,
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _selectedCustomer!.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
                                     ),
-                                  ),
-                              ],
-                            ),
+                                    if (_selectedCustomer!.phone != null)
+                                      Text(
+                                        _selectedCustomer!.phone!,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  setState(() {
+                                    _selectedCustomer = null;
+                                    _searchController.clear();
+                                  });
+                                },
+                              ),
+                            ],
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () {
-                              setState(() {
-                                _selectedCustomer = null;
-                                _searchController.clear();
-                              });
-                            },
-                          ),
+                           // عرض رصيد المحفظة إذا كان الخيار "من الرصيد"
+                           if (_paymentMethod == 'من الرصيد') ...[
+                             const Divider(),
+                             Row(
+                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                               children: [
+                                 const Text("رصيد المحفظة المتاح:"),
+                                 Text(
+                                   "${_selectedCustomer!.walletBalance.toStringAsFixed(2)} شيكل",
+                                   style: TextStyle(
+                                     fontWeight: FontWeight.bold,
+                                     color: _selectedCustomer!.walletBalance >= double.parse(_paidAmountController.text.isEmpty ? "0" : _paidAmountController.text) 
+                                         ? Colors.green 
+                                         : Colors.red,
+                                   ),
+                                 ),
+                               ],
+                             ),
+                           ],
                         ],
                       ),
                     ),

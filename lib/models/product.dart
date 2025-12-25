@@ -3,7 +3,8 @@ import 'package:pos_desktop/models/product_package.dart';
 class Product {
   final int? id;
   final String name;
-  final double price;
+  final double price; // سعر البيع
+  final double purchasePrice; // سعر الشراء - NEW
   double stock;
   final String? barcode;
   List<ProductPackage> packages;
@@ -24,6 +25,7 @@ class Product {
     this.id,
     required this.name,
     required this.price,
+    this.purchasePrice = 0.0, // Default to 0
     this.stock = 0.0,
     this.barcode,
     this.categoryId, // تمت إضافته للمُنشئ
@@ -41,6 +43,7 @@ class Product {
       'id': id,
       'name': name,
       'price': price,
+      'purchase_price': purchasePrice,
       'stock': stock,
       'barcode': barcode,
       'category_id': categoryId, // --- تعديل: إرسال الـ ID إلى قاعدة البيانات
@@ -57,6 +60,7 @@ class Product {
       name: map['name'],
       price:
           map['price'] is int ? (map['price'] as int).toDouble() : map['price'],
+      purchasePrice: (map['purchase_price'] as num?)?.toDouble() ?? 0.0,
       stock: (map['stock'] as num? ?? 0).toDouble(),
       barcode: map['barcode'],
       categoryId:
@@ -74,6 +78,7 @@ class Product {
     int? id,
     String? name,
     double? price,
+    double? purchasePrice,
     double? stock,
     String? barcode,
     int? categoryId, // تمت إضافته هنا
@@ -88,6 +93,7 @@ class Product {
       id: id ?? this.id,
       name: name ?? this.name,
       price: price ?? this.price,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
       stock: stock ?? this.stock,
       barcode: barcode ?? this.barcode,
       categoryId: categoryId ?? this.categoryId, // تمت إضافته هنا

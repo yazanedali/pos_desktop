@@ -15,7 +15,138 @@ class ReportQueries {
     return 0.0;
   }
 
-  // دالة لجلب تقرير المبيعات مجمّع حسب اليوم
+  // ========== تقرير الربح البسيط (المبيعات - المشتريات) ==========
+  Future<List<ProfitReportData>> getProfitReport(String from, String to) async {
+    final sales = await getSalesReport(from, to);
+    final purchases = await getPurchaseReport(from, to);
+
+    // استخدام Map لتسهيل دمج البيانات حسب التاريخ
+    final Map<String, double> salesByDate = {
+      for (var s in sales) s.date: s.total,
+    };
+    final Map<String, double> purchasesByDate = {
+      for (var p in purchases) p.date: p.total,
+    };
+
+    // جمع كل التواريخ الفريدة
+    final allDates =
+        {...salesByDate.keys, ...purchasesByDate.keys}.toList()..sort();
+
+    List<ProfitReportData> profitData = [];
+    for (String date in allDates) {
+      final salesTotal = salesByDate[date] ?? 0.0;
+      final purchasesTotal = purchasesByDate[date] ?? 0.0;
+      profitData.add(
+        ProfitReportData(
+          date: date,
+          sales: salesTotal,
+          purchases: purchasesTotal,
+          profit: salesTotal - purchasesTotal,
+        ),
+      );
+    }
+    return profitData;
+  }
+
+  // ========== تقرير الربح الفعلي (المبيعات - تكلفة البضاعة المباعة) ==========
+  Future<List<ActualProfitReportData>> getActualProfitReport(
+    String from,
+    String to,
+  ) async {
+    final db = await _dbHelper.database;
+
+    final results = await db.rawQuery(
+      '''
+      -- تقرير الربح الفعلي باستخدام متوسط سعر الشراء
+      SELECT 
+        si.date,
+        COALESCE(SUM(sii.total), 0) as sales,
+        COALESCE(SUM(sii.quantity * COALESCE(p.purchase_price, 0)), 0) as cost_of_goods_sold,
+        COALESCE(SUM(sii.total), 0) - COALESCE(SUM(sii.quantity * COALESCE(p.purchase_price, 0)), 0) as actual_profit,
+        CASE 
+          WHEN COALESCE(SUM(sii.total), 0) > 0 
+          THEN ((COALESCE(SUM(sii.total), 0) - COALESCE(SUM(sii.quantity * COALESCE(p.purchase_price, 0)), 0)) / COALESCE(SUM(sii.total), 0)) * 100
+          ELSE 0
+        END as profit_margin
+      FROM sales_invoices si
+      JOIN sales_invoice_items sii ON si.id = sii.invoice_id
+      LEFT JOIN products p ON p.name = sii.product_name
+      WHERE si.date BETWEEN ? AND ?
+      GROUP BY si.date
+      ORDER BY si.date
+    ''',
+      [from, to],
+    );
+
+    return results.map((row) {
+      return ActualProfitReportData(
+        date: row['date'] as String,
+        sales: _convertToDouble(row['sales']),
+        costOfGoodsSold: _convertToDouble(row['cost_of_goods_sold']),
+        actualProfit: _convertToDouble(row['actual_profit']),
+        profitMargin: _convertToDouble(row['profit_margin']),
+      );
+    }).toList();
+  }
+
+  // ========== تقرير الربح الفعلي المتقدم (يستخدم متوسط السعر من فواتير الشراء) ==========
+  Future<List<ActualProfitReportData>> getAdvancedActualProfitReport(
+    String from,
+    String to,
+  ) async {
+    final db = await _dbHelper.database;
+
+    final results = await db.rawQuery(
+      '''
+      -- تقرير الربح الفعلي المتقدم باستخدام متوسط سعر الشراء من فواتير الشراء
+      WITH sales_data AS (
+        SELECT 
+          si.date,
+          sii.product_name,
+          SUM(sii.total) as product_sales,
+          SUM(sii.quantity) as product_quantity
+        FROM sales_invoices si
+        JOIN sales_invoice_items sii ON si.id = sii.invoice_id
+        WHERE si.date BETWEEN ? AND ?
+        GROUP BY si.date, sii.product_name
+      ),
+      avg_prices AS (
+        SELECT 
+          product_name,
+          COALESCE(AVG(purchase_price), 0) as avg_purchase_price
+        FROM purchase_invoice_items
+        GROUP BY product_name
+      )
+      SELECT 
+        sd.date,
+        SUM(sd.product_sales) as sales,
+        SUM(sd.product_quantity * COALESCE(ap.avg_purchase_price, 0)) as cost_of_goods_sold,
+        SUM(sd.product_sales) - SUM(sd.product_quantity * COALESCE(ap.avg_purchase_price, 0)) as actual_profit,
+        CASE 
+          WHEN SUM(sd.product_sales) > 0 
+          THEN ((SUM(sd.product_sales) - SUM(sd.product_quantity * COALESCE(ap.avg_purchase_price, 0))) / SUM(sd.product_sales)) * 100
+          ELSE 0
+        END as profit_margin
+      FROM sales_data sd
+      LEFT JOIN avg_prices ap ON sd.product_name = ap.product_name
+      GROUP BY sd.date
+      ORDER BY sd.date
+    ''',
+      [from, to],
+    );
+
+    return results.map((row) {
+      return ActualProfitReportData(
+        date: row['date'] as String,
+        sales: _convertToDouble(row['sales']),
+        costOfGoodsSold: _convertToDouble(row['cost_of_goods_sold']),
+        actualProfit: _convertToDouble(row['actual_profit']),
+        profitMargin: _convertToDouble(row['profit_margin']),
+      );
+    }).toList();
+  }
+
+  // ========== دالة لجلب تقرير المبيعات ==========
   Future<List<SalesReportData>> getSalesReport(String from, String to) async {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> maps = await db.rawQuery(
@@ -49,6 +180,39 @@ class ReportQueries {
     });
   }
 
+  // ========== دالة لجلب تقرير المشتريات ==========
+  Future<List<PurchaseReportData>> getPurchaseReport(
+    String from,
+    String to,
+  ) async {
+    final db = await _dbHelper.database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery(
+      '''
+      SELECT 
+        pi.date, 
+        COUNT(DISTINCT pi.id) as invoices, 
+        SUM(pii.quantity) as items, 
+        SUM(pii.total) as total 
+      FROM purchase_invoices pi
+      JOIN purchase_invoice_items pii ON pi.id = pii.invoice_id
+      WHERE pi.date BETWEEN ? AND ? 
+      GROUP BY pi.date 
+      ORDER BY pi.date
+    ''',
+      [from, to],
+    );
+
+    return List.generate(maps.length, (i) {
+      return PurchaseReportData(
+        date: maps[i]['date'] as String,
+        invoices: (maps[i]['invoices'] as int?) ?? 0,
+        items: _convertToDouble(maps[i]['items']),
+        total: _convertToDouble(maps[i]['total']),
+      );
+    });
+  }
+
+  // ========== باقي الدوال كما هي ==========
   Future<List<OutstandingDebtData>> getOutstandingDebts() async {
     final db = await DatabaseHelper().database;
 
@@ -89,7 +253,6 @@ class ReportQueries {
     );
   }
 
-  // دالة لجلب تقرير المبيعات حسب نوع الدفع
   Future<List<PaymentTypeReportData>> getSalesByPaymentType(
     String from,
     String to,
@@ -141,7 +304,6 @@ class ReportQueries {
     });
   }
 
-  // دالة لجلب تقرير حالة السداد
   Future<List<PaymentStatusReportData>> getPaymentStatusReport(
     String from,
     String to,
@@ -202,6 +364,7 @@ class ReportQueries {
         invoiceId: maps[i]['invoice_id'],
         invoiceNumber: maps[i]['invoice_number'],
         customerName: maps[i]['customer_name'],
+        customerPhone: maps[i]['customer_phone'],
         paymentDate: maps[i]['payment_date'],
         paymentTime: maps[i]['payment_time'],
         amount: maps[i]['amount'] ?? 0.0,
@@ -210,71 +373,6 @@ class ReportQueries {
         createdAt: maps[i]['created_at'],
       );
     });
-  }
-
-  // دالة لجلب تقرير المشتريات مجمّع حسب اليوم
-  Future<List<PurchaseReportData>> getPurchaseReport(
-    String from,
-    String to,
-  ) async {
-    final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> maps = await db.rawQuery(
-      '''
-      SELECT 
-        pi.date, 
-        COUNT(DISTINCT pi.id) as invoices, 
-        SUM(pii.quantity) as items, 
-        SUM(pi.total) as total 
-      FROM purchase_invoices pi
-      JOIN purchase_invoice_items pii ON pi.id = pii.invoice_id
-      WHERE pi.date BETWEEN ? AND ? 
-      GROUP BY pi.date 
-      ORDER BY pi.date
-    ''',
-      [from, to],
-    );
-
-    return List.generate(maps.length, (i) {
-      return PurchaseReportData(
-        date: maps[i]['date'] as String,
-        invoices: (maps[i]['invoices'] as int?) ?? 0,
-        items: _convertToDouble(maps[i]['items']),
-        total: _convertToDouble(maps[i]['total']),
-      );
-    });
-  }
-
-  // دالة لجلب تقرير الأرباح (الأكثر تعقيدًا)
-  Future<List<ProfitReportData>> getProfitReport(String from, String to) async {
-    final sales = await getSalesReport(from, to);
-    final purchases = await getPurchaseReport(from, to);
-
-    // استخدام Map لتسهيل دمج البيانات حسب التاريخ
-    final Map<String, double> salesByDate = {
-      for (var s in sales) s.date: s.total,
-    };
-    final Map<String, double> purchasesByDate = {
-      for (var p in purchases) p.date: p.total,
-    };
-
-    // جمع كل التواريخ الفريدة
-    final allDates =
-        {...salesByDate.keys, ...purchasesByDate.keys}.toList()..sort();
-
-    List<ProfitReportData> profitData = [];
-    for (String date in allDates) {
-      final salesTotal = salesByDate[date] ?? 0.0;
-      final purchasesTotal = purchasesByDate[date] ?? 0.0;
-      profitData.add(
-        ProfitReportData(
-          date: date,
-          sales: salesTotal,
-          purchases: purchasesTotal,
-          profit: salesTotal - purchasesTotal,
-        ),
-      );
-    }
-    return profitData;
   }
 
   // دالة لجلب تقرير المنتجات (تستخدم لعدة تقارير)
@@ -289,7 +387,6 @@ class ReportQueries {
   }) async {
     final db = await DatabaseHelper().database;
 
-    // --- === هذا هو التعديل الرئيسي === ---
     // تحديد جملة الربط بناءً على نوع الجدول
     String joinCondition;
     if (itemTable == 'sales_invoice_items') {
@@ -299,7 +396,6 @@ class ReportQueries {
       // جدول المشتريات يُربط بـ barcode
       joinCondition = 'LEFT JOIN products p ON items.barcode = p.barcode';
     }
-    // --- === نهاية التعديل الرئيسي === ---
 
     final List<Map<String, dynamic>> maps = await db.rawQuery(
       '''
@@ -310,7 +406,7 @@ class ReportQueries {
           p.stock as remaining
         FROM $itemTable items
         JOIN $invoiceTable invoices ON items.invoice_id = invoices.id
-        $joinCondition  -- <-- استخدام جملة الربط الديناميكية هنا
+        $joinCondition
         WHERE invoices.date BETWEEN ? AND ?
         GROUP BY items.product_name
         ORDER BY $orderBy DESC
@@ -351,7 +447,7 @@ class ReportQueries {
       invoiceTable: 'sales_invoices',
       orderBy: 'quantity',
       limit: 100,
-    ); // حد أكبر
+    );
   }
 
   Future<List<ProductReportData>> getPurchasedItems(
@@ -366,5 +462,144 @@ class ReportQueries {
       orderBy: 'quantity',
       limit: 100,
     );
+  }
+
+  // دالة محسنة لحساب تكلفة البضاعة المباعة
+  Future<List<ActualProfitReportData>> getActualProfitReportFixed(
+    String from,
+    String to,
+  ) async {
+    final db = await _dbHelper.database;
+
+    final results = await db.rawQuery(
+      '''
+      -- حساب تكلفة البضاعة المباعة باستخدام سعر الشراء الفعلي
+      WITH product_costs AS (
+        -- استخدام أول سعر شراء متاح لكل منتج
+        SELECT 
+          pii.product_name,
+          COALESCE(
+            -- حاول الحصول على متوسط السعر
+            (
+              SELECT AVG(pii2.purchase_price)
+              FROM purchase_invoice_items pii2
+              WHERE pii2.product_name = pii.product_name
+            ),
+            -- إذا لم يوجد، استخدم أول سعر
+            (
+              SELECT pii3.purchase_price
+              FROM purchase_invoice_items pii3
+              WHERE pii3.product_name = pii.product_name
+              ORDER BY (SELECT pi.date || pi.time 
+                       FROM purchase_invoices pi 
+                       WHERE pi.id = pii3.invoice_id)
+              LIMIT 1
+            ),
+            0
+          ) as purchase_price
+        FROM purchase_invoice_items pii
+        GROUP BY pii.product_name
+      )
+      SELECT 
+        si.date,
+        SUM(sii.total) as sales,
+        SUM(sii.quantity * COALESCE(pc.purchase_price, 0)) as cost_of_goods_sold,
+        SUM(sii.total) - SUM(sii.quantity * COALESCE(pc.purchase_price, 0)) as actual_profit,
+        CASE 
+          WHEN SUM(sii.total) > 0 
+          THEN ((SUM(sii.total) - SUM(sii.quantity * COALESCE(pc.purchase_price, 0))) / SUM(sii.total)) * 100
+          ELSE 0
+        END as profit_margin
+      FROM sales_invoices si
+      JOIN sales_invoice_items sii ON si.id = sii.invoice_id
+      LEFT JOIN product_costs pc ON sii.product_name = pc.product_name
+      WHERE si.date BETWEEN ? AND ?
+      GROUP BY si.date
+      ORDER BY si.date
+    ''',
+      [from, to],
+    );
+
+    return results.map((row) {
+      return ActualProfitReportData(
+        date: row['date'] as String,
+        sales: _convertToDouble(row['sales']),
+        costOfGoodsSold: _convertToDouble(row['cost_of_goods_sold']),
+        actualProfit: _convertToDouble(row['actual_profit']),
+        profitMargin: _convertToDouble(row['profit_margin']),
+      );
+    }).toList();
+  }
+
+  // إصدار أبسط وأكثر فعالية
+  Future<List<ActualProfitReportData>> getActualProfitReportSimple(
+    String from,
+    String to,
+  ) async {
+    final db = await _dbHelper.database;
+
+    final results = await db.rawQuery(
+      '''
+      -- حساب تكلفة البضاعة المباعة باستخدام أي سعر شراء متاح
+      SELECT 
+        si.date,
+        SUM(sii.total) as sales,
+        SUM(
+          sii.quantity * COALESCE(
+            (
+              SELECT purchase_price 
+              FROM purchase_invoice_items pii 
+              WHERE pii.product_name = sii.product_name 
+              LIMIT 1
+            ),
+            0
+          )
+        ) as cost_of_goods_sold,
+        SUM(sii.total) - SUM(
+          sii.quantity * COALESCE(
+            (
+              SELECT purchase_price 
+              FROM purchase_invoice_items pii 
+              WHERE pii.product_name = sii.product_name 
+              LIMIT 1
+            ),
+            0
+          )
+        ) as actual_profit,
+        CASE 
+          WHEN SUM(sii.total) > 0 
+          THEN (
+            (SUM(sii.total) - SUM(
+              sii.quantity * COALESCE(
+                (
+                  SELECT purchase_price 
+                  FROM purchase_invoice_items pii 
+                  WHERE pii.product_name = sii.product_name 
+                  LIMIT 1
+                ),
+                0
+              )
+            )) / SUM(sii.total)
+          ) * 100
+          ELSE 0
+        END as profit_margin
+      FROM sales_invoices si
+      JOIN sales_invoice_items sii ON si.id = sii.invoice_id
+      WHERE si.date BETWEEN ? AND ?
+      GROUP BY si.date
+      ORDER BY si.date
+    ''',
+      [from, to],
+    );
+
+    return results.map((row) {
+      return ActualProfitReportData(
+        date: row['date'] as String,
+        sales: _convertToDouble(row['sales']),
+        costOfGoodsSold: _convertToDouble(row['cost_of_goods_sold']),
+        actualProfit: _convertToDouble(row['actual_profit']),
+        profitMargin: _convertToDouble(row['profit_margin']),
+      );
+    }).toList();
   }
 }

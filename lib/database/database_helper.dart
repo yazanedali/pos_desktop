@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 3,
+      version: 6,
       onCreate: _createDatabase,
       onUpgrade: (db, oldVersion, newVersion) async {
         // Migration path: v2 -> v3 add product_barcodes table
@@ -49,6 +49,71 @@ class DatabaseHelper {
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_product_barcodes_barcode ON product_barcodes(barcode)',
           );
+        }
+
+        // Migration path: v3 -> v4 Add Suppliers and Wallet Balance
+        // This might have been skipped if user was already on v4, so we repeat checks in v6
+        if (oldVersion < 4) {
+          // Logic intentionally left empty or same as original,
+          // but we rely on the v6 catch-all block below to be safer.
+        }
+
+        // Migration path: v4 -> v5 (Was incomplete in previous attempts)
+
+        // Migration path: Catch-all fix -> v6
+        if (oldVersion < 6) {
+          // 1. Ensure Suppliers table exists
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS suppliers (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              phone TEXT,
+              address TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          ''');
+
+          // 2. Ensure purchase_price exists
+          try {
+            await db.execute(
+              "ALTER TABLE products ADD COLUMN purchase_price REAL DEFAULT 0",
+            );
+          } catch (e) {
+            // Column likely exists
+          }
+
+          // 3. Ensure wallet_balance exists
+          try {
+            await db.execute(
+              "ALTER TABLE customers ADD COLUMN wallet_balance REAL DEFAULT 0",
+            );
+          } catch (e) {
+            // Column likely exists
+          }
+
+          // 4. Ensure purchase_invoices columns exist
+          try {
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN supplier_id INTEGER",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN payment_status TEXT DEFAULT 'مدفوع'",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN paid_amount REAL DEFAULT 0",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN remaining_amount REAL DEFAULT 0",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN payment_type TEXT DEFAULT 'نقدي'",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN notes TEXT",
+            );
+          } catch (e) {
+            // Columns likely exist
+          }
         }
       },
     );
@@ -80,7 +145,8 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         phone TEXT,
         address TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        wallet_balance REAL DEFAULT 0
       )
     ''');
 
@@ -90,6 +156,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
         price REAL NOT NULL,
+        purchase_price REAL DEFAULT 0,
         stock REAL DEFAULT 0,
         barcode TEXT UNIQUE,
         category_id INTEGER,
@@ -209,6 +276,23 @@ class DatabaseHelper {
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
     ''');
+
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS inventory_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  transaction_date TEXT NOT NULL,
+  transaction_type TEXT NOT NULL, -- 'PURCHASE' أو 'SALE'
+  invoice_id INTEGER,
+  quantity REAL NOT NULL,
+  unit_cost REAL NOT NULL,
+  total_cost REAL NOT NULL,
+  remaining_quantity REAL NOT NULL,
+  average_cost REAL NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products (id)
+      )
+    ''');
   }
 
   Future<void> _insertInitialData(Database db) async {
@@ -261,6 +345,53 @@ class DatabaseHelper {
     if (_database != null) {
       await _database!.close();
       _database = null;
+    }
+  }
+
+  double _convertToDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  // دالة لتحديث متوسط سعر الشراء لمنتج
+  Future<void> updateProductAveragePurchasePrice(String productName) async {
+    final db = await database;
+
+    final result = await db.rawQuery(
+      '''
+      SELECT 
+        AVG(purchase_price) as avg_price,
+        SUM(quantity) as total_quantity
+      FROM purchase_invoice_items
+      WHERE product_name = ?
+      GROUP BY product_name
+    ''',
+      [productName],
+    );
+
+    if (result.isNotEmpty) {
+      final avgPrice = _convertToDouble(result.first['avg_price']);
+      await db.update(
+        'products',
+        {'purchase_price': avgPrice},
+        where: 'name = ?',
+        whereArgs: [productName],
+      );
+    }
+  }
+
+  // دالة لتحديث متوسط أسعار جميع المنتجات
+  Future<void> updateAllProductsAveragePrices() async {
+    final db = await database;
+
+    final products = await db.query('products');
+
+    for (var product in products) {
+      final productName = product['name'] as String;
+      await updateProductAveragePurchasePrice(productName);
     }
   }
 }
