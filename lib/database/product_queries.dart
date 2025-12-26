@@ -331,7 +331,7 @@ class ProductQueries {
   // Pagination (نظام الصفحات)
   // ---------------------------------------------------------------------------
 
-  static const int pageSize = 16;
+  static const int pageSize = 20;
 
   Future<List<Product>> getProductsPaginated({
     required int page,

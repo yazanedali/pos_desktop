@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 6,
+      version: 7, // غير من 6 إلى 7
       onCreate: _createDatabase,
       onUpgrade: (db, oldVersion, newVersion) async {
         // Migration path: v2 -> v3 add product_barcodes table
@@ -52,15 +52,17 @@ class DatabaseHelper {
         }
 
         // Migration path: v3 -> v4 Add Suppliers and Wallet Balance
-        // This might have been skipped if user was already on v4, so we repeat checks in v6
         if (oldVersion < 4) {
           // Logic intentionally left empty or same as original,
           // but we rely on the v6 catch-all block below to be safer.
         }
 
         // Migration path: v4 -> v5 (Was incomplete in previous attempts)
+        if (oldVersion < 5) {
+          // No specific migration, just ensuring upgrade path
+        }
 
-        // Migration path: Catch-all fix -> v6
+        // Migration path: v5 -> v6 (Existing migrations)
         if (oldVersion < 6) {
           // 1. Ensure Suppliers table exists
           await db.execute('''
@@ -114,6 +116,93 @@ class DatabaseHelper {
           } catch (e) {
             // Columns likely exist
           }
+
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_payments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              payment_date TEXT NOT NULL,
+              payment_time TEXT NOT NULL,
+              amount REAL NOT NULL,
+              payment_type TEXT DEFAULT 'نقدي',
+              notes TEXT,
+              invoice_id INTEGER,
+              is_opening_balance INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL
+            )
+          ''');
+
+          // جدول معاملات رصيد الموردين
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_balance_transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              transaction_date TEXT NOT NULL,
+              transaction_time TEXT NOT NULL,
+              description TEXT NOT NULL,
+              debit REAL DEFAULT 0,
+              credit REAL DEFAULT 0,
+              balance REAL NOT NULL,
+              invoice_id INTEGER,
+              payment_id INTEGER,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL,
+              FOREIGN KEY (payment_id) REFERENCES supplier_payments (id) ON DELETE SET NULL
+            )
+          ''');
+        }
+
+        // Migration path: v6 -> v7 (NEW - Add tables to existing users)
+        if (oldVersion < 7) {
+          // تأكد من إنشاء الجداول للمستخدمين القدامى الذين نسوا إنشاءها
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS suppliers (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              phone TEXT,
+              address TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          ''');
+
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_payments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              payment_date TEXT NOT NULL,
+              payment_time TEXT NOT NULL,
+              amount REAL NOT NULL,
+              payment_type TEXT DEFAULT 'نقدي',
+              notes TEXT,
+              invoice_id INTEGER,
+              is_opening_balance INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL
+            )
+          ''');
+
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_balance_transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              transaction_date TEXT NOT NULL,
+              transaction_time TEXT NOT NULL,
+              description TEXT NOT NULL,
+              debit REAL DEFAULT 0,
+              credit REAL DEFAULT 0,
+              balance REAL NOT NULL,
+              invoice_id INTEGER,
+              payment_id INTEGER,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL,
+              FOREIGN KEY (payment_id) REFERENCES supplier_payments (id) ON DELETE SET NULL
+            )
+          ''');
         }
       },
     );
@@ -167,6 +256,17 @@ class DatabaseHelper {
       )
     ''');
 
+    // جدول الموردين (جديد - قبل supplier_payments)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        address TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
     // جدول فواتير المبيعات (بعد إنشاء customers)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sales_invoices (
@@ -192,19 +292,19 @@ class DatabaseHelper {
 
     // جدول عناصر فواتير المبيعات
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS sales_invoice_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_id INTEGER NOT NULL,
-      product_id INTEGER,
-      product_name TEXT NOT NULL,
-      price REAL NOT NULL,
-      quantity REAL NOT NULL,
-      total REAL NOT NULL,
-      unit_quantity REAL NOT NULL DEFAULT 1.0, -- ⬅️ أضف هذا
-      unit_name TEXT NOT NULL DEFAULT 'حبة',  -- ⬅️ أضف هذا
-      FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
-    )
-  ''');
+      CREATE TABLE IF NOT EXISTS sales_invoice_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_name TEXT NOT NULL,
+        price REAL NOT NULL,
+        quantity REAL NOT NULL,
+        total REAL NOT NULL,
+        unit_quantity REAL NOT NULL DEFAULT 1.0,
+        unit_name TEXT NOT NULL DEFAULT 'حبة',
+        FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
+      )
+    ''');
 
     // جدول فواتير الشراء
     await db.execute('''
@@ -232,6 +332,44 @@ class DatabaseHelper {
         sale_price REAL NOT NULL,
         total REAL NOT NULL,
         FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // جدول دفعات الموردين (جديد)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS supplier_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_id INTEGER NOT NULL,
+        payment_date TEXT NOT NULL,
+        payment_time TEXT NOT NULL,
+        amount REAL NOT NULL,
+        payment_type TEXT DEFAULT 'نقدي',
+        notes TEXT,
+        invoice_id INTEGER,
+        is_opening_balance INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+        FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL
+      )
+    ''');
+
+    // جدول معاملات رصيد الموردين (جديد)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS supplier_balance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_id INTEGER NOT NULL,
+        transaction_date TEXT NOT NULL,
+        transaction_time TEXT NOT NULL,
+        description TEXT NOT NULL,
+        debit REAL DEFAULT 0,
+        credit REAL DEFAULT 0,
+        balance REAL NOT NULL,
+        invoice_id INTEGER,
+        payment_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+        FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL,
+        FOREIGN KEY (payment_id) REFERENCES supplier_payments (id) ON DELETE SET NULL
       )
     ''');
 
@@ -277,20 +415,21 @@ class DatabaseHelper {
       )
     ''');
 
+    // جدول حركات المخزون
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS inventory_transactions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id INTEGER NOT NULL,
-  transaction_date TEXT NOT NULL,
-  transaction_type TEXT NOT NULL, -- 'PURCHASE' أو 'SALE'
-  invoice_id INTEGER,
-  quantity REAL NOT NULL,
-  unit_cost REAL NOT NULL,
-  total_cost REAL NOT NULL,
-  remaining_quantity REAL NOT NULL,
-  average_cost REAL NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products (id)
+      CREATE TABLE IF NOT EXISTS inventory_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        transaction_date TEXT NOT NULL,
+        transaction_type TEXT NOT NULL,
+        invoice_id INTEGER,
+        quantity REAL NOT NULL,
+        unit_cost REAL NOT NULL,
+        total_cost REAL NOT NULL,
+        remaining_quantity REAL NOT NULL,
+        average_cost REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products (id)
       )
     ''');
   }
@@ -345,6 +484,86 @@ class DatabaseHelper {
     if (_database != null) {
       await _database!.close();
       _database = null;
+    }
+  }
+
+  // دالة مساعدة للتحقق من وجود جدول
+  Future<bool> tableExists(String tableName) async {
+    try {
+      final db = await database;
+      final result = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        [tableName],
+      );
+      return result.isNotEmpty;
+    } catch (e) {
+      print('Error checking table $tableName: $e');
+      return false;
+    }
+  }
+
+  // دالة طارئة لإنشاء الجداول إذا لم تكن موجودة
+  Future<void> ensureTablesExist() async {
+    final db = await database;
+
+    final tablesToCheck = [
+      'suppliers',
+      'supplier_payments',
+      'supplier_balance_transactions',
+    ];
+
+    for (var table in tablesToCheck) {
+      if (!await tableExists(table)) {
+        print('Table $table not found, creating it...');
+
+        if (table == 'suppliers') {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS suppliers (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              phone TEXT,
+              address TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          ''');
+        } else if (table == 'supplier_payments') {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_payments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              payment_date TEXT NOT NULL,
+              payment_time TEXT NOT NULL,
+              amount REAL NOT NULL,
+              payment_type TEXT DEFAULT 'نقدي',
+              notes TEXT,
+              invoice_id INTEGER,
+              is_opening_balance INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL
+            )
+          ''');
+        } else if (table == 'supplier_balance_transactions') {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS supplier_balance_transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              supplier_id INTEGER NOT NULL,
+              transaction_date TEXT NOT NULL,
+              transaction_time TEXT NOT NULL,
+              description TEXT NOT NULL,
+              debit REAL DEFAULT 0,
+              credit REAL DEFAULT 0,
+              balance REAL NOT NULL,
+              invoice_id INTEGER,
+              payment_id INTEGER,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE,
+              FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE SET NULL,
+              FOREIGN KEY (payment_id) REFERENCES supplier_payments (id) ON DELETE SET NULL
+            )
+          ''');
+        }
+      }
     }
   }
 

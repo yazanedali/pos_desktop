@@ -30,6 +30,7 @@ class ProductDialog extends StatefulWidget {
 class _ProductDialogState extends State<ProductDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
+  late TextEditingController _purchasePriceController;
   late TextEditingController _priceController;
   late TextEditingController _stockController;
   late TextEditingController _barcodeController;
@@ -47,6 +48,9 @@ class _ProductDialogState extends State<ProductDialog> {
 
     _nameController = TextEditingController(
       text: isEditing ? widget.product!.name : '',
+    );
+    _purchasePriceController = TextEditingController(
+      text: isEditing ? widget.product!.purchasePrice.toString() : '',
     );
     _priceController = TextEditingController(
       text: isEditing ? widget.product!.price.toString() : '',
@@ -84,11 +88,16 @@ class _ProductDialogState extends State<ProductDialog> {
               ),
             )
             : [];
+
+    // إضافة مستمعين لحساب الربح تلقائياً
+    _purchasePriceController.addListener(_updateProfitDisplay);
+    _priceController.addListener(_updateProfitDisplay);
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _purchasePriceController.dispose();
     _priceController.dispose();
     _stockController.dispose();
     _barcodeController.dispose();
@@ -96,6 +105,10 @@ class _ProductDialogState extends State<ProductDialog> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _updateProfitDisplay() {
+    setState(() {}); // تحديث الواجهة لعرض الربح
   }
 
   void _generateBarcode() {
@@ -131,7 +144,7 @@ class _ProductDialogState extends State<ProductDialog> {
       builder:
           (context) => QuickAddCategoryDialog(
             existingCategories: _localCategories,
-            addToDatabase: true, // ✅ تأكد من تمرير true هنا
+            addToDatabase: true,
           ),
     );
 
@@ -191,6 +204,7 @@ class _ProductDialogState extends State<ProductDialog> {
       final product = Product(
         id: widget.product?.id,
         name: _nameController.text,
+        purchasePrice: double.tryParse(_purchasePriceController.text) ?? 0.0,
         price: double.tryParse(_priceController.text) ?? 0.0,
         stock: double.tryParse(_stockController.text) ?? 0.0,
         barcode:
@@ -201,6 +215,36 @@ class _ProductDialogState extends State<ProductDialog> {
         additionalBarcodes: additionalBarcodes,
       );
       widget.onSave(product);
+    }
+  }
+
+  // حساب الربح
+  String _calculateProfit() {
+    try {
+      final purchasePrice = double.tryParse(_purchasePriceController.text) ?? 0;
+      final salePrice = double.tryParse(_priceController.text) ?? 0;
+      final profit = salePrice - purchasePrice;
+      final percentage = purchasePrice > 0 ? (profit / purchasePrice) * 100 : 0;
+
+      return '${profit.toStringAsFixed(2)} ش (${percentage.toStringAsFixed(1)}%)';
+    } catch (e) {
+      return '0.00 ش (0%)';
+    }
+  }
+
+  // تحديد لون الربح
+  Color _getProfitColor() {
+    try {
+      final purchasePrice = double.tryParse(_purchasePriceController.text) ?? 0;
+      final salePrice = double.tryParse(_priceController.text) ?? 0;
+      final profit = salePrice - purchasePrice;
+
+      if (profit < 0) return Colors.red;
+      if (profit == 0) return Colors.grey;
+      if (profit < purchasePrice * 0.1) return Colors.orange;
+      return Colors.green;
+    } catch (e) {
+      return Colors.grey;
     }
   }
 
@@ -257,6 +301,8 @@ class _ProductDialogState extends State<ProductDialog> {
           style: TextStyle(color: Colors.grey),
         ),
         const SizedBox(height: 16),
+
+        // اسم المنتج
         TextFormField(
           controller: _nameController,
           decoration: const InputDecoration(
@@ -272,15 +318,38 @@ class _ProductDialogState extends State<ProductDialog> {
         ),
         const SizedBox(height: 20),
 
-        // --- صف السعر والكمية ---
+        // صف الأسعار (سعر الشراء - سعر البيع - الربح)
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start, // محاذاة للأعلى
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Expanded(
+              child: TextFormField(
+                controller: _purchasePriceController,
+                decoration: const InputDecoration(
+                  labelText: "سعر الشراء *",
+                  prefixIcon: Icon(Icons.price_check),
+                  border: OutlineInputBorder(),
+                  suffixText: "شيكل",
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
+                ],
+                validator:
+                    (v) =>
+                        (v == null || v.isEmpty || double.tryParse(v) == null)
+                            ? "أدخل سعر شراء صحيح"
+                            : null,
+              ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: TextFormField(
                 controller: _priceController,
                 decoration: const InputDecoration(
-                  labelText: "سعر الوحدة الأساسية *",
+                  labelText: "سعر البيع *",
                   prefixIcon: Icon(Icons.attach_money),
                   border: OutlineInputBorder(),
                   suffixText: "شيكل",
@@ -294,32 +363,58 @@ class _ProductDialogState extends State<ProductDialog> {
                 validator:
                     (v) =>
                         (v == null || v.isEmpty || double.tryParse(v) == null)
-                            ? "أدخل سعر صحيح"
+                            ? "أدخل سعر بيع صحيح"
                             : null,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
-              child: TextFormField(
-                controller: _stockController,
-                decoration: const InputDecoration(
-                  labelText: "الكمية بالمخزون",
-                  prefixIcon: Icon(Icons.inventory_2_outlined),
-                  border: OutlineInputBorder(),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'الربح',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _calculateProfit(),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _getProfitColor(),
+                      ),
+                    ),
+                  ],
                 ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
-                ],
               ),
             ),
           ],
         ),
-
-        // -------------------------------------------------------------------
         const SizedBox(height: 20),
+
+        // الكمية بالمخزون
+        TextFormField(
+          controller: _stockController,
+          decoration: const InputDecoration(
+            labelText: "الكمية بالمخزون",
+            prefixIcon: Icon(Icons.inventory_2_outlined),
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // باركود الوحدة الأساسية
         TextFormField(
           controller: _barcodeController,
           decoration: InputDecoration(
@@ -334,6 +429,7 @@ class _ProductDialogState extends State<ProductDialog> {
         ),
         const SizedBox(height: 20),
 
+        // باركودات إضافية
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -420,6 +516,8 @@ class _ProductDialogState extends State<ProductDialog> {
           ),
         ),
         const SizedBox(height: 20),
+
+        // اختيار الفئة
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

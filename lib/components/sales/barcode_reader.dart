@@ -4,7 +4,6 @@ import '../../models/product.dart';
 import '/widgets/top_alert.dart';
 
 class BarcodeReader extends StatefulWidget {
-  // 2. تم تحديد نوع الدالة بشكل أدق
   final void Function(Product) onProductScanned;
   final List<Product> products;
 
@@ -20,12 +19,11 @@ class BarcodeReader extends StatefulWidget {
 
 class _BarcodeReaderState extends State<BarcodeReader> {
   final _barcodeController = TextEditingController();
-  final FocusNode _barcodeFocusNode = FocusNode(); // ← إضافة FocusNode
+  final FocusNode _barcodeFocusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    // نجعل التركيز دائم عند فتح الصفحة
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
     });
@@ -34,19 +32,26 @@ class _BarcodeReaderState extends State<BarcodeReader> {
   @override
   void dispose() {
     _barcodeController.dispose();
-    _barcodeFocusNode.dispose(); // ← مسح FocusNode
+    _barcodeFocusNode.dispose();
     super.dispose();
   }
 
   void _handleBarcodeSubmit() async {
-    // جعل الدالة async
     final barcode = _barcodeController.text.trim();
     if (barcode.isEmpty) return;
 
-    // البحث مباشرة في قاعدة البيانات (أضمن وأشمل)
+    // البحث مباشرة في قاعدة البيانات
     final product = await ProductQueries().getProductByBarcode(barcode);
 
     if (product != null) {
+      // جلب حزم المنتج
+      if (product.id != null) {
+        final packages = await ProductQueries().getPackagesForProduct(
+          product.id!,
+        );
+        product.packages = packages;
+      }
+
       widget.onProductScanned(product);
       _barcodeController.clear();
       FocusScope.of(context).requestFocus(_barcodeFocusNode);
@@ -93,7 +98,7 @@ class _BarcodeReaderState extends State<BarcodeReader> {
               Expanded(
                 child: TextField(
                   controller: _barcodeController,
-                  focusNode: _barcodeFocusNode, // ← ربط الـ FocusNode
+                  focusNode: _barcodeFocusNode,
                   decoration: const InputDecoration(
                     hintText: "امسح الباركود أو اكتبه...",
                     border: OutlineInputBorder(),
@@ -105,7 +110,7 @@ class _BarcodeReaderState extends State<BarcodeReader> {
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontFamily: 'monospace', fontSize: 16),
                   onSubmitted: (_) => _handleBarcodeSubmit(),
-                  autofocus: true, // ← لضمان فتح المؤشر تلقائيًا
+                  autofocus: true,
                 ),
               ),
               const SizedBox(width: 8),

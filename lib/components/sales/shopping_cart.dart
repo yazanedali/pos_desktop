@@ -1,4 +1,3 @@
-// components/sales/shopping_cart.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_desktop/models/product.dart';
@@ -6,7 +5,6 @@ import 'package:pos_desktop/models/product_package.dart';
 import '../../models/cart_item.dart';
 import '/widgets/top_alert.dart';
 
-// 1. تحويل إلى StatefulWidget للسماح بإدارة الـ Controllers
 class ShoppingCart extends StatefulWidget {
   final List<CartItem> cartItems;
   final List<Product> products;
@@ -32,12 +30,28 @@ class ShoppingCart extends StatefulWidget {
 }
 
 class _ShoppingCartState extends State<ShoppingCart> {
-  // دالة مساعدة للعثور على المنتج الأصلي
+  // --- التعديل الأساسي هنا ---
+  // هذه الدالة الآن آمنة ولن تسبب Crash إذا كان المنتج غير موجود في القائمة المعروضة
   Product _getProductForCartItem(CartItem item) {
-    return widget.products.firstWhere((p) => p.id == item.id);
+    return widget.products.firstWhere(
+      (p) => p.id == item.id,
+      orElse: () {
+        // في حال لم يتم العثور على المنتج (بسبب الفلترة)، ننشئ منتجاً من بيانات السلة
+        return Product(
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          stock: item.stock,
+          // نسترجع الحزم من بيانات السلة، مع استبعاد الوحدة الأساسية لأن الـ UI قد يضيفها
+          packages:
+              item.availablePackages
+                  .where((p) => p.containedQuantity != 1.0)
+                  .toList(),
+        );
+      },
+    );
   }
 
-  // دالة لحساب الإجمالي
   double _calculateTotal() {
     return widget.cartItems.fold(
       0,
@@ -68,7 +82,6 @@ class _ShoppingCartState extends State<ShoppingCart> {
     );
   }
 
-  // ودجت رأس السلة
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -103,7 +116,6 @@ class _ShoppingCartState extends State<ShoppingCart> {
     );
   }
 
-  // ودجت السلة الفارغة
   Widget _buildEmptyCart() {
     return const Center(
       child: Column(
@@ -120,33 +132,49 @@ class _ShoppingCartState extends State<ShoppingCart> {
     );
   }
 
-  // ودجت قائمة عناصر السلة
   Widget _buildCartItems() {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: widget.cartItems.length,
       itemBuilder: (context, index) {
-        return _buildCartItem(widget.cartItems[index]);
+        // نمرر الـ key لضمان تحديث الـ widgets بشكل صحيح عند الحذف
+        return _buildCartItem(
+          widget.cartItems[index],
+          Key(widget.cartItems[index].cartItemId),
+        );
       },
     );
   }
 
-  // 2. ودجت بناء عنصر السلة (الكود الجديد والمحسّن)
-  Widget _buildCartItem(CartItem item) {
+  Widget _buildCartItem(CartItem item, Key key) {
+    // نستخدم الدالة الآمنة التي أنشأناها
     final product = _getProductForCartItem(item);
-    final availablePackages = [
-      ProductPackage(name: 'حبة', price: product.price, containedQuantity: 1.0),
-      ...product.packages,
-    ];
+
+    // نستخدم الحزم الموجودة في عنصر السلة مباشرة لضمان الاتساق
+    // إذا كانت فارغة (وهذا نادر)، نستخدم الطريقة القديمة كاحتياط
+    final List<ProductPackage> availablePackages =
+        item.availablePackages.isNotEmpty
+            ? item.availablePackages
+            : [
+              ProductPackage(
+                name: 'حبة',
+                price: product.price,
+                containedQuantity: 1.0,
+              ),
+              ...product.packages,
+            ];
 
     final quantityController = TextEditingController(
       text: item.quantity.toStringAsFixed(item.quantity % 1 == 0 ? 0 : 3),
     );
+
+    // تحسين وضع المؤشر في نهاية النص
     quantityController.selection = TextSelection.fromPosition(
       TextPosition(offset: quantityController.text.length),
     );
 
     return Card(
+      key: key,
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -180,6 +208,7 @@ class _ShoppingCartState extends State<ShoppingCart> {
             const SizedBox(height: 8),
             Row(
               children: [
+                // القائمة المنسدلة للوحدات
                 Expanded(
                   flex: 3,
                   child: DropdownButtonFormField<String>(
@@ -195,11 +224,13 @@ class _ShoppingCartState extends State<ShoppingCart> {
                     ),
                     items:
                         availablePackages.map((package) {
+                          // التحقق من المخزون بناءً على المنتج (سواء كان الأصلي أو المؤقت)
                           final bool isEnabled =
                               product.stock >= package.containedQuantity;
                           return DropdownMenuItem(
                             value: package.name,
-                            enabled: isEnabled,
+                            enabled:
+                                isEnabled, // تعطيل الوحدة إذا لم يكن هناك مخزون كافٍ
                             child: Text(
                               package.name,
                               style: TextStyle(
@@ -212,20 +243,26 @@ class _ShoppingCartState extends State<ShoppingCart> {
                         }).toList(),
                     onChanged: (value) {
                       if (value != null && value != item.unitName) {
-                        final selectedPackage = availablePackages.firstWhere(
-                          (p) => p.name == value,
-                        );
-                        widget.onUnitChanged(
-                          item.cartItemId,
-                          selectedPackage,
-                          false,
-                        );
-                        item.quantity = 1.0;
+                        try {
+                          final selectedPackage = availablePackages.firstWhere(
+                            (p) => p.name == value,
+                          );
+                          widget.onUnitChanged(
+                            item.cartItemId,
+                            selectedPackage,
+                            false,
+                          );
+                          // إعادة تعيين الكمية لـ 1 عند تغيير الوحدة لتجنب مشاكل المخزون
+                          // يمكن إزالتها إذا كانت الدالة onUnitChanged تعالج ذلك
+                        } catch (e) {
+                          // تجاهل الخطأ في حال حدوث مشكلة غير متوقعة
+                        }
                       }
                     },
                   ),
                 ),
                 const SizedBox(width: 8),
+                // التحكم بالكمية
                 Expanded(
                   flex: 3,
                   child: Row(
@@ -296,7 +333,6 @@ class _ShoppingCartState extends State<ShoppingCart> {
     );
   }
 
-  // 3. ودجت مساعد لبناء الأزرار بشكل متناسق
   Widget _buildQuantityButton(
     IconData icon,
     VoidCallback onPressed, {
@@ -318,7 +354,6 @@ class _ShoppingCartState extends State<ShoppingCart> {
     );
   }
 
-  // ودجت تذييل السلة
   Widget _buildCartFooter(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),

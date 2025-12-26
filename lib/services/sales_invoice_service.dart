@@ -416,13 +416,13 @@ class SalesInvoiceService {
           throw Exception('المخزون غير كافي للمنتج ${item.productName}');
         }
       }
-      
+
       // 3. خصم من المحفظة إذا كان الدفع من الرصيد
       if (paymentMethod == 'من الرصيد' && customerId != null) {
-          await txn.rawUpdate(
-            'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?', 
-            [paidAmount, customerId]
-          );
+        await txn.rawUpdate(
+          'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?',
+          [paidAmount, customerId],
+        );
       }
     });
 

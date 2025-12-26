@@ -28,6 +28,15 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   int _currentPage = 1;
   int _totalInvoicesCount = 0;
 
+  // فلتر حالة الدفع
+  String _paymentStatusFilter = 'الكل';
+  final List<String> _paymentStatusOptions = [
+    'الكل',
+    'مدفوع',
+    'مدفوع جزئي',
+    'غير مدفوع',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -90,12 +99,16 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
         page: _currentPage,
         searchTerm:
             _searchController.text.isNotEmpty ? _searchController.text : null,
+        paymentStatus:
+            _paymentStatusFilter != 'الكل' ? _paymentStatusFilter : null,
       );
 
       // الحصول على العدد الكلي للفواتير (مع الفلترة)
       final totalCount = await _purchaseQueries.getPurchaseInvoicesCount(
         searchTerm:
             _searchController.text.isNotEmpty ? _searchController.text : null,
+        paymentStatus:
+            _paymentStatusFilter != 'الكل' ? _paymentStatusFilter : null,
       );
 
       if (!mounted) return;
@@ -138,13 +151,27 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   void _clearFilters() {
     setState(() {
       _searchController.clear();
+      _paymentStatusFilter = 'الكل';
     });
     _loadInvoices(reset: true);
   }
 
-  void _addInvoice(PurchaseInvoice invoice) async {
+  void _onPaymentStatusFilterChanged(String? newValue) {
+    if (newValue != null) {
+      setState(() {
+        _paymentStatusFilter = newValue;
+      });
+      _loadInvoices(reset: true);
+    }
+  }
+
+  void _addInvoice(PurchaseInvoice invoice, String updateMethod) async {
+    // ← تحديث
     try {
-      await _purchaseQueries.insertPurchaseInvoice(invoice);
+      await _purchaseQueries.insertPurchaseInvoice(
+        invoice,
+        purchasePriceUpdateMethod: updateMethod, // ← تمرير الخيار
+      );
       TopAlert.showSuccess(
         context: context,
         message: "تم إضافة فاتورة الشراء ${invoice.invoiceNumber} بنجاح",
@@ -155,9 +182,13 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
   }
 
-  void _updateInvoice(PurchaseInvoice invoice) async {
+  void _updateInvoice(PurchaseInvoice invoice, String updateMethod) async {
+    // ← تحديث
     try {
-      await _purchaseQueries.updatePurchaseInvoice(invoice);
+      await _purchaseQueries.updatePurchaseInvoice(
+        invoice,
+        purchasePriceUpdateMethod: updateMethod,
+      );
       TopAlert.showSuccess(
         context: context,
         message: "تم تعديل الفاتورة ${invoice.invoiceNumber} بنجاح",
@@ -178,8 +209,9 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
           (context) => PurchaseInvoiceDialog(
             categories: _categories,
             invoiceToEdit: invoice,
-            onSave: (updatedInvoice) {
-              _updateInvoice(updatedInvoice);
+            onSave: (updatedInvoice, updateMethod) {
+              // ← تحديث
+              _updateInvoice(updatedInvoice, updateMethod);
               Navigator.of(context).pop();
             },
             onCancel: () => Navigator.of(context).pop(),
@@ -218,8 +250,9 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
       builder:
           (context) => PurchaseInvoiceDialog(
             categories: _categories,
-            onSave: (invoice) {
-              _addInvoice(invoice);
+            onSave: (invoice, updateMethod) {
+              // ← تحديث هنا
+              _addInvoice(invoice, updateMethod);
               Navigator.of(context).pop();
             },
             onCancel: () => Navigator.of(context).pop(),
@@ -246,7 +279,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildSearchCard(),
+              child: _buildFiltersCard(),
             ),
           ),
 
@@ -324,7 +357,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     );
   }
 
-  Widget _buildSearchCard() {
+  Widget _buildFiltersCard() {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
@@ -335,6 +368,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // حقل البحث
             TextField(
               controller: _searchController,
               onChanged: _onSearch,
@@ -345,7 +379,10 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
                     _searchController.text.isNotEmpty
                         ? IconButton(
                           icon: const Icon(Icons.clear),
-                          onPressed: _clearFilters,
+                          onPressed: () {
+                            _searchController.clear();
+                            _onSearch('');
+                          },
                         )
                         : null,
                 border: OutlineInputBorder(
@@ -353,28 +390,83 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
                 ),
               ),
             ),
-            if (_searchController.text.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Text(
-                    'فلترة مفعلة',
-                    style: TextStyle(
-                      color: Colors.orange[700],
-                      fontWeight: FontWeight.bold,
+
+            const SizedBox(height: 12),
+
+            // فلتر حالة الدفع
+            Row(
+              children: [
+                const Icon(Icons.payment, size: 20, color: Colors.grey),
+                const SizedBox(width: 8),
+                const Text(
+                  'حالة الدفع:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _paymentStatusFilter,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12),
                     ),
+                    items:
+                        _paymentStatusOptions.map((status) {
+                          return DropdownMenuItem(
+                            value: status,
+                            child: Text(status),
+                          );
+                        }).toList(),
+                    onChanged: _onPaymentStatusFilterChanged,
                   ),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: _clearFilters,
-                    child: const Text('مسح الفلترة'),
-                  ),
-                ],
-              ),
+                ),
+              ],
+            ),
+
+            // إظهار الفلاتر النشطة
+            if (_searchController.text.isNotEmpty ||
+                _paymentStatusFilter != 'الكل') ...[
+              const SizedBox(height: 12),
+              _buildActiveFilters(),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildActiveFilters() {
+    final List<String> activeFilters = [];
+
+    if (_searchController.text.isNotEmpty) {
+      activeFilters.add('بحث: ${_searchController.text}');
+    }
+
+    if (_paymentStatusFilter != 'الكل') {
+      activeFilters.add('حالة: $_paymentStatusFilter');
+    }
+
+    return Row(
+      children: [
+        Icon(Icons.filter_alt, size: 16, color: Colors.orange[700]),
+        const SizedBox(width: 8),
+        Text(
+          'فلتر مفعل (${activeFilters.join('، ')})',
+          style: TextStyle(
+            color: Colors.orange[700],
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+        const Spacer(),
+        OutlinedButton(
+          onPressed: _clearFilters,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          ),
+          child: const Text('مسح الكل'),
+        ),
+      ],
     );
   }
 
@@ -400,107 +492,372 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
             color: Colors.grey,
           ),
         ),
+        const Spacer(),
+        // إظهار ملخص الحالات
+        _buildStatusSummary(),
       ],
     );
   }
 
+  Widget _buildStatusSummary() {
+    // حساب عدد الفواتير لكل حالة (من القائمة المرشحة)
+    int paidCount =
+        _invoices.where((inv) => inv.paymentStatus == 'مدفوع').length;
+    int partialCount =
+        _invoices
+            .where(
+              (inv) =>
+                  inv.paymentStatus == 'مدفوع جزئي' ||
+                  inv.paymentStatus == 'جزئي',
+            )
+            .length;
+    int unpaidCount =
+        _invoices.where((inv) => inv.paymentStatus == 'غير مدفوع').length;
+
+    return Row(
+      children: [
+        _buildStatusBadge('مدفوعة', paidCount, Colors.green),
+        const SizedBox(width: 8),
+        _buildStatusBadge('جزئية', partialCount, Colors.orange),
+        const SizedBox(width: 8),
+        _buildStatusBadge('غير مدفوعة', unpaidCount, Colors.red),
+      ],
+    );
+  }
+
+  Widget _buildStatusBadge(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$label: $count',
+            style: TextStyle(
+              fontSize: 12,
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInvoiceCard(PurchaseInvoice invoice) {
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+
+    // تحديد لون ونص حسب حالة الدفع
+    switch (invoice.paymentStatus) {
+      case 'مدفوع':
+        statusColor = Colors.green;
+        statusText = 'مدفوع كامل';
+        statusIcon = Icons.check_circle;
+        break;
+      case 'جزئي':
+      case 'مدفوع جزئي':
+        statusColor = Colors.orange;
+        statusText = 'مدفوع جزئي';
+        statusIcon = Icons.paid;
+        break;
+      case 'غير مدفوع':
+        statusColor = Colors.red;
+        statusText = 'غير مدفوع';
+        statusIcon = Icons.pending;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusText = 'غير معروف';
+        statusIcon = Icons.help_outline;
+    }
+
+    // حساب نسبة الدفع
+    double paymentPercentage =
+        invoice.total > 0 ? (invoice.paidAmount / invoice.total) * 100 : 0;
+
     return Card(
       elevation: 2,
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            // الصف العلوي: رقم الفاتورة والحالة
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[300]!),
+                  ),
+                  child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blue[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue[300]!),
-                        ),
-                        child: Text(
-                          invoice.invoiceNumber,
-                          style: const TextStyle(
-                            color: Colors.blue,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      Icon(Icons.receipt, size: 16, color: Colors.blue),
+                      const SizedBox(width: 4),
+                      Text(
+                        invoice.invoiceNumber,
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                    ],
+                  ),
+                ),
+
+                // بطاقة حالة الدفع
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: statusColor.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(statusIcon, size: 16, color: statusColor),
+                      const SizedBox(width: 6),
                       Text(
-                        "${invoice.items.length} منتج",
-                        style: const TextStyle(
-                          color: Colors.grey,
+                        statusText,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
                           fontSize: 14,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Row(
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // معلومات الفاتورة
+            Row(
+              children: [
+                // معلومات المورد والتاريخ
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 16,
-                        color: Colors.grey,
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.business,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            invoice.supplier,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "${invoice.date} - ${invoice.time}",
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                      const SizedBox(width: 16),
-                      const Icon(Icons.business, size: 16, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        invoice.supplier,
-                        style: const TextStyle(color: Colors.grey),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.calendar_today,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            "${invoice.date} - ${invoice.time}",
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Icon(Icons.inventory_2, size: 14, color: Colors.grey),
+                          const SizedBox(width: 6),
+                          Text(
+                            "${invoice.items.length} منتج",
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  "${invoice.total.toStringAsFixed(2)} شيكل",
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue,
-                  ),
                 ),
-                const SizedBox(height: 4),
-                Row(
+
+                // المبالغ المالية
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    TextButton(
-                      onPressed: () => _showInvoiceDetails(invoice),
-                      child: const Text("عرض التفاصيل"),
+                    Text(
+                      "${invoice.total.toStringAsFixed(2)} ش",
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.orange),
-                      onPressed: () => _showEditInvoiceDialog(invoice),
-                      tooltip: 'تعديل الفاتورة',
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _deleteInvoice(invoice.id!),
+                    const SizedBox(height: 4),
+
+                    // عرض تفاصيل الدفع
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (invoice.paymentStatus == 'مدفوع')
+                          Text(
+                            'مدفوع بالكامل',
+                            style: TextStyle(color: statusColor, fontSize: 12),
+                          ),
+
+                        if (invoice.paymentStatus == 'مدفوع جزئي' ||
+                            invoice.paymentStatus == 'جزئي')
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'مدفوع: ',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    "${invoice.paidAmount.toStringAsFixed(2)} ش",
+                                    style: TextStyle(
+                                      color: statusColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'باقي: ',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    "${invoice.remainingAmount.toStringAsFixed(2)} ش",
+                                    style: const TextStyle(
+                                      color: Colors.red,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              // شريط تقدم نسبة الدفع
+                              Container(
+                                width: 100,
+                                height: 6,
+                                margin: const EdgeInsets.only(top: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: paymentPercentage / 100,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: statusColor,
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '${paymentPercentage.toStringAsFixed(1)}%',
+                                style: TextStyle(
+                                  color: statusColor,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                        if (invoice.paymentStatus == 'غير مدفوع')
+                          Text(
+                            'مديونية: ${invoice.total.toStringAsFixed(2)} ش',
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
               ],
+            ),
+
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+
+            // أزرار التحكم
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _showInvoiceDetails(invoice),
+                    icon: const Icon(Icons.remove_red_eye, size: 18),
+                    label: const Text("التفاصيل"),
+                    style: TextButton.styleFrom(foregroundColor: Colors.blue),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.edit, size: 20),
+                    onPressed: () => _showEditInvoiceDialog(invoice),
+                    color: Colors.orange,
+                    tooltip: 'تعديل الفاتورة',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete, size: 20),
+                    onPressed: () => _deleteInvoice(invoice.id!),
+                    color: Colors.red,
+                    tooltip: 'حذف الفاتورة',
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -524,23 +881,49 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   }
 
   Widget _buildEmptyState() {
+    IconData emptyIcon;
+    String emptyMessage;
+    String emptySubMessage;
+
+    if (_paymentStatusFilter != 'الكل') {
+      emptyIcon = Icons.filter_alt_off;
+      emptyMessage = "لا توجد فواتير بحالة '$_paymentStatusFilter'";
+      emptySubMessage = "حاول تغيير فلتر حالة الدفع";
+    } else if (_searchController.text.isNotEmpty) {
+      emptyIcon = Icons.search_off;
+      emptyMessage = "لا توجد نتائج للبحث";
+      emptySubMessage = "حاول البحث بكلمة أخرى";
+    } else {
+      emptyIcon = Icons.receipt;
+      emptyMessage = "لا توجد فواتير شراء حتى الآن";
+      emptySubMessage = "قم بإضافة فاتورة شراء جديدة لتظهر هنا";
+    }
+
     return Container(
       padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.receipt, size: 48, color: Colors.grey[300]),
+          Icon(emptyIcon, size: 48, color: Colors.grey[300]),
           const SizedBox(height: 16),
-          const Text(
-            "لا توجد فواتير شراء حتى الآن",
-            style: TextStyle(fontSize: 16, color: Colors.grey),
+          Text(
+            emptyMessage,
+            style: const TextStyle(fontSize: 16, color: Colors.grey),
           ),
           const SizedBox(height: 8),
-          const Text(
-            "قم بإضافة فاتورة شراء جديدة لتظهر هنا",
-            style: TextStyle(fontSize: 14, color: Colors.grey),
+          Text(
+            emptySubMessage,
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
+          if (_paymentStatusFilter != 'الكل' ||
+              _searchController.text.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _clearFilters,
+              child: const Text('مسح الفلاتر'),
+            ),
+          ],
         ],
       ),
     );

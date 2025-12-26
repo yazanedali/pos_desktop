@@ -11,15 +11,15 @@ import './product_dialog.dart'; // ← استيراد نافذة المنتج
 
 class PurchaseInvoiceDialog extends StatefulWidget {
   final List<Category> categories;
-  final Function(PurchaseInvoice) onSave;
+  final Function(PurchaseInvoice, String) onSave; // ← تغيير هنا
   final Function() onCancel;
   final PurchaseInvoice? invoiceToEdit;
-  final Function()? onProductAdded; // ← دالة استدعاء عند إضافة منتج جديد
+  final Function()? onProductAdded;
 
   const PurchaseInvoiceDialog({
     Key? key,
     required this.categories,
-    required this.onSave,
+    required this.onSave, // ← تحديث
     required this.onCancel,
     this.invoiceToEdit,
     this.onProductAdded,
@@ -34,6 +34,8 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   List<PurchaseInvoiceItem> _invoiceItems = [];
   bool get _isEditMode => widget.invoiceToEdit != null;
   late String _generatedInvoiceNumber;
+
+  String _purchasePriceUpdateMethod = 'جديد'; // 'متوسط' أو 'جديد'
 
   final ProductQueries _productQueries = ProductQueries();
   // Supplier & Payment Logic
@@ -316,7 +318,6 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       paid = 0;
       remaining = total;
     } else {
-      // جزئي
       paid = double.tryParse(_paidAmountController.text) ?? 0.0;
       if (paid > total) {
         TopAlert.showError(
@@ -355,12 +356,13 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
       items: validItems,
       total: total,
       paymentStatus: _paymentStatus,
-      paymentType: _paymentStatus == 'غير مدفوع' ? 'آجل' : 'نقدي', // تبسيط
+      paymentType: _paymentStatus == 'غير مدفوع' ? 'آجل' : 'نقدي',
       paidAmount: paid,
       remainingAmount: remaining,
     );
 
-    widget.onSave(invoice);
+    // ← أضف معلمة الخيار هنا
+    widget.onSave(invoice, _purchasePriceUpdateMethod);
   }
 
   Widget _buildProductsList() {
@@ -750,6 +752,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // الصف الأول: معلومات الفاتورة الأساسية
               Row(
                 children: [
                   Expanded(
@@ -818,6 +821,8 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                 ],
               ),
               const SizedBox(height: 12),
+
+              // الصف الثاني: حالة الدفع وطريقة تحديث السعر
               Row(
                 children: [
                   Expanded(
@@ -864,8 +869,52 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       ),
                     ),
                   ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      value: _purchasePriceUpdateMethod,
+                      decoration: const InputDecoration(
+                        labelText: "تحديث سعر الشراء",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.price_change),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'جديد',
+                          child: Text("السعر الجديد فقط"),
+                        ),
+                        DropdownMenuItem(
+                          value: 'متوسط',
+                          child: Text("حسب المتوسط المرجح"),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _purchasePriceUpdateMethod = val!;
+                        });
+                      },
+                    ),
+                  ),
                 ],
               ),
+
+              // رسالة توضيحية
+              if (_purchasePriceUpdateMethod.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _purchasePriceUpdateMethod == 'متوسط'
+                        ? "سيتم حساب متوسط السعر بناءً على الكميات والأسعار السابقة"
+                        : "سيتم استخدام سعر الشراء الجديد فقط وتجاهل الأسعار السابقة",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+
               const SizedBox(height: 20),
               Expanded(
                 child: Row(

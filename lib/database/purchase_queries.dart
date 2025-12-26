@@ -10,66 +10,74 @@ class PurchaseQueries {
   // ثابت حجم الصفحة
   static const int pageSize = 15;
 
-  // ========== دالة مساعدة لتحديث سعر شراء المنتج ==========
+  // ========== دالة مساعدة لتحديث سعر شراء المنتج (مع الخيار) ==========
   Future<void> _updateProductPurchasePrice({
     required Transaction txn,
     required String productName,
+    required double newPurchasePrice,
+    required int newQuantity,
+    required String updateMethod, // 'متوسط' أو 'جديد'
   }) async {
     try {
-      // استخدم المتوسط المرجح بالكمية بدلاً من المتوسط البسيط
-      final result = await txn.rawQuery(
-        '''
-      SELECT 
-        SUM(quantity * purchase_price) / SUM(quantity) as weighted_avg_price,
-        SUM(quantity) as total_quantity
-      FROM purchase_invoice_items
-      WHERE product_name = ?
-      HAVING SUM(quantity) > 0
-    ''',
-        [productName],
-      );
-
-      if (result.isNotEmpty && result.first['weighted_avg_price'] != null) {
-        final avgPrice = result.first['weighted_avg_price'];
-        double priceValue = 0.0;
-
-        if (avgPrice is double)
-          priceValue = avgPrice;
-        else if (avgPrice is int)
-          priceValue = avgPrice.toDouble();
-        else if (avgPrice is String)
-          priceValue = double.tryParse(avgPrice) ?? 0.0;
-
+      if (updateMethod == 'جديد') {
+        // الطريقة الجديدة: استخدام السعر الجديد فقط
         await txn.update(
           'products',
-          {'purchase_price': priceValue},
+          {'purchase_price': newPurchasePrice},
           where: 'name = ?',
           whereArgs: [productName],
+        );
+        print(
+          '✅ تم تحديث سعر شراء "$productName" إلى $newPurchasePrice (السعر الجديد)',
         );
       } else {
-        await txn.update(
-          'products',
-          {'purchase_price': 0.0},
-          where: 'name = ?',
-          whereArgs: [productName],
+        // الطريقة الافتراضية: المتوسط المرجح
+        final result = await txn.rawQuery(
+          '''
+        SELECT 
+          SUM(quantity * purchase_price) as total_cost,
+          SUM(quantity) as total_quantity
+        FROM purchase_invoice_items
+        WHERE product_name = ?
+      ''',
+          [productName],
         );
+
+        if (result.isNotEmpty) {
+          final totalCost = result.first['total_cost'] as double? ?? 0.0;
+          final totalQuantity =
+              result.first['total_quantity'] as double? ?? 0.0;
+
+          // حساب المتوسط المرجح
+          final weightedAvg =
+              (totalCost + (newPurchasePrice * newQuantity)) /
+              (totalQuantity + newQuantity);
+
+          await txn.update(
+            'products',
+            {'purchase_price': weightedAvg},
+            where: 'name = ?',
+            whereArgs: [productName],
+          );
+
+          print(
+            '✅ تم تحديث سعر شراء "$productName" إلى $weightedAvg (المتوسط المرجح)',
+          );
+        } else {
+          // إذا لم يكن هناك مشتريات سابقة
+          await txn.update(
+            'products',
+            {'purchase_price': newPurchasePrice},
+            where: 'name = ?',
+            whereArgs: [productName],
+          );
+          print(
+            '✅ تم تعيين سعر شراء "$productName" إلى $newPurchasePrice (أول شراء)',
+          );
+        }
       }
     } catch (e) {
       print('❌ خطأ في تحديث سعر شراء المنتج "$productName": $e');
-    }
-  }
-
-  // دالة مساعدة لتحديث سعر شراء جميع المنتجات في الفاتورة
-  Future<void> _updateAllProductsPurchasePrices({
-    required Transaction txn,
-    required List<PurchaseInvoiceItem> items,
-  }) async {
-    // تحديث سعر شراء كل منتج في الفاتورة
-    for (final item in items) {
-      await _updateProductPurchasePrice(
-        txn: txn,
-        productName: item.productName,
-      );
     }
   }
 
@@ -104,8 +112,11 @@ class PurchaseQueries {
     }
   }
 
-  // ========== دالة إضافة فاتورة شراء (محدثة) ==========
-  Future<PurchaseInvoice> insertPurchaseInvoice(PurchaseInvoice invoice) async {
+  Future<PurchaseInvoice> insertPurchaseInvoice(
+    PurchaseInvoice invoice, {
+    String purchasePriceUpdateMethod = 'جديد',
+    bool updateSalePrice = true, // ← معامل جديد لتحديث سعر البيع
+  }) async {
     final db = await dbHelper.database;
 
     await db.transaction((txn) async {
@@ -130,18 +141,36 @@ class PurchaseQueries {
           productName: item.productName,
           quantity: item.quantity,
         );
-      }
 
-      // تحديث أسعار شراء جميع المنتجات في الفاتورة
-      await _updateAllProductsPurchasePrices(txn: txn, items: invoice.items);
+        // تحديث سعر الشراء حسب الطريقة المختارة
+        await _updateProductPurchasePrice(
+          txn: txn,
+          productName: item.productName,
+          newPurchasePrice: item.purchasePrice,
+          newQuantity: item.quantity.toInt(),
+          updateMethod: purchasePriceUpdateMethod,
+        );
+
+        // تحديث سعر البيع (جديد) ← أضف هذا
+        if (updateSalePrice && item.salePrice > 0) {
+          await _updateProductSalePrice(
+            txn: txn,
+            productName: item.productName,
+            newSalePrice: item.salePrice,
+          );
+        }
+      }
     });
 
-    print('✅ تم إضافة فاتورة شراء وتحديث أسعار المنتجات');
     return invoice;
   }
 
-  // ========== دالة تعديل فاتورة شراء (محدثة) ==========
-  Future<void> updatePurchaseInvoice(PurchaseInvoice invoice) async {
+  // ========== دالة تعديل فاتورة شراء (محدثة مع الخيار) ==========
+  Future<void> updatePurchaseInvoice(
+    PurchaseInvoice invoice, {
+    String purchasePriceUpdateMethod = 'جديد',
+    bool updateSalePrice = true, // ← معامل جديد
+  }) async {
     final db = await dbHelper.database;
 
     await db.transaction((txn) async {
@@ -160,7 +189,7 @@ class PurchaseQueries {
           txn: txn,
           barcode: oldItem.barcode,
           productName: oldItem.productName,
-          quantity: -oldItem.quantity, // ناقص لأننا نرجع الكمية
+          quantity: -oldItem.quantity,
         );
       }
 
@@ -193,19 +222,44 @@ class PurchaseQueries {
           productName: newItem.productName,
           quantity: newItem.quantity,
         );
-      }
 
-      // تحديث أسعار شراء جميع المنتجات (القديمة والجديدة)
-      final allProducts = [...oldItems, ...invoice.items];
-      final uniqueProductNames =
-          allProducts.map((item) => item.productName).toSet();
+        // تحديث سعر الشراء حسب الطريقة المختارة
+        await _updateProductPurchasePrice(
+          txn: txn,
+          productName: newItem.productName,
+          newPurchasePrice: newItem.purchasePrice,
+          newQuantity: newItem.quantity.toInt(),
+          updateMethod: purchasePriceUpdateMethod,
+        );
 
-      for (final productName in uniqueProductNames) {
-        await _updateProductPurchasePrice(txn: txn, productName: productName);
+        // تحديث سعر البيع (جديد) ← أضف هذا
+        if (updateSalePrice && newItem.salePrice > 0) {
+          await _updateProductSalePrice(
+            txn: txn,
+            productName: newItem.productName,
+            newSalePrice: newItem.salePrice,
+          );
+        }
       }
     });
+  }
 
-    print('✅ تم تحديث فاتورة الشراء وتحديث أسعار المنتجات');
+  // في purchase_queries.dart
+  Future<void> _updateProductSalePrice({
+    required Transaction txn,
+    required String productName,
+    required double newSalePrice,
+  }) async {
+    try {
+      await txn.update(
+        'products',
+        {'price': newSalePrice},
+        where: 'name = ?',
+        whereArgs: [productName],
+      );
+    } catch (e) {
+      print('❌ خطأ في تحديث سعر بيع المنتج "$productName": $e');
+    }
   }
 
   // ========== دالة حذف فاتورة شراء (محدثة) ==========
@@ -237,20 +291,22 @@ class PurchaseQueries {
         await _updateProductPurchasePrice(
           txn: txn,
           productName: item.productName,
+          newPurchasePrice: item.purchasePrice,
+          newQuantity: item.quantity.toInt(),
+          updateMethod: 'متوسط', // نستخدم المتوسط لإعادة الحساب
         );
       }
 
       // حذف الفاتورة والعناصر
       await txn.delete('purchase_invoices', where: 'id = ?', whereArgs: [id]);
     });
-
-    print('✅ تم حذف فاتورة الشراء وتحديث أسعار المنتجات');
   }
 
-  // ========== باقي الدوال كما هي ==========
+  // ========== دالة الحصول على فواتير الشراء مع فلترة (محدثة) ==========
   Future<List<PurchaseInvoice>> getPurchaseInvoicesPaginated({
     required int page,
     String? searchTerm,
+    String? paymentStatus,
   }) async {
     final db = await dbHelper.database;
     final offset = (page - 1) * pageSize;
@@ -258,15 +314,29 @@ class PurchaseQueries {
     String whereClause = '';
     List<dynamic> whereArgs = [];
 
+    final conditions = <String>[];
+
     if (searchTerm != null && searchTerm.isNotEmpty) {
-      whereClause = 'invoice_number LIKE ? OR supplier LIKE ?';
-      whereArgs = ['%$searchTerm%', '%$searchTerm%'];
+      conditions.add('(invoice_number LIKE ? OR supplier LIKE ?)');
+      whereArgs.add('%$searchTerm%');
+      whereArgs.add('%$searchTerm%');
+    }
+
+    if (paymentStatus != null &&
+        paymentStatus.isNotEmpty &&
+        paymentStatus != 'الكل') {
+      conditions.add('payment_status = ?');
+      whereArgs.add(paymentStatus);
+    }
+
+    if (conditions.isNotEmpty) {
+      whereClause = conditions.join(' AND ');
     }
 
     final query = '''
       SELECT * FROM purchase_invoices 
       ${whereClause.isNotEmpty ? 'WHERE $whereClause' : ''}
-      ORDER BY created_at DESC 
+      ORDER BY date DESC, time DESC
       LIMIT ? OFFSET ?
     ''';
 
@@ -287,15 +357,33 @@ class PurchaseQueries {
     );
   }
 
-  Future<int> getPurchaseInvoicesCount({String? searchTerm}) async {
+  // ========== دالة الحصول على عدد فواتير الشراء مع فلترة (محدثة) ==========
+  Future<int> getPurchaseInvoicesCount({
+    String? searchTerm,
+    String? paymentStatus,
+  }) async {
     final db = await dbHelper.database;
 
     String whereClause = '';
     List<dynamic> whereArgs = [];
 
+    final conditions = <String>[];
+
     if (searchTerm != null && searchTerm.isNotEmpty) {
-      whereClause = 'invoice_number LIKE ? OR supplier LIKE ?';
-      whereArgs = ['%$searchTerm%', '%$searchTerm%'];
+      conditions.add('(invoice_number LIKE ? OR supplier LIKE ?)');
+      whereArgs.add('%$searchTerm%');
+      whereArgs.add('%$searchTerm%');
+    }
+
+    if (paymentStatus != null &&
+        paymentStatus.isNotEmpty &&
+        paymentStatus != 'الكل') {
+      conditions.add('payment_status = ?');
+      whereArgs.add(paymentStatus);
+    }
+
+    if (conditions.isNotEmpty) {
+      whereClause = conditions.join(' AND ');
     }
 
     final query = '''
@@ -347,15 +435,15 @@ class PurchaseQueries {
               .map((name) => name!)
               .toList();
 
-      print('🔄 جاري تحديث أسعار ${productNames.length} منتج...');
-
-      int updatedCount = 0;
       for (final productName in productNames) {
-        await _updateProductPurchasePrice(txn: txn, productName: productName);
-        updatedCount++;
+        await _updateProductPurchasePrice(
+          txn: txn,
+          productName: productName,
+          newPurchasePrice: 0.0,
+          newQuantity: 0,
+          updateMethod: 'متوسط',
+        );
       }
-
-      print('✅ تم تحديث أسعار $updatedCount منتج');
     });
   }
 }

@@ -6,7 +6,9 @@ import '../../models/category.dart';
 import '../../models/product.dart';
 import '../../database/category_queries.dart';
 import '../../database/product_queries.dart';
-import '../widgets/product_grid.dart';
+import '../widgets/product_category_filter.dart';
+import '../widgets/product_table_header.dart';
+import '../widgets/product_table_row.dart';
 import '../widgets/top_alert.dart';
 
 class ProductManagementPage extends StatefulWidget {
@@ -49,8 +51,8 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels ==
-          _scrollController.position.maxScrollExtent) {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
         _loadMoreProducts();
       }
     });
@@ -257,7 +259,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
               : RefreshIndicator(
                 onRefresh: _loadData,
                 child: CustomScrollView(
-                  controller: _scrollController, // مهم!
+                  controller: _scrollController,
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
                     SliverToBoxAdapter(
@@ -279,16 +281,41 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                       ),
                     ),
 
-                    // Products List Header
+                    // Products List Header & Filters
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: _buildProductsHeader(),
+                        child: Column(
+                          children: [
+                            _buildProductsHeader(),
+                            const SizedBox(height: 16),
+                            ProductCategoryFilter(
+                              categories: _categories,
+                              selectedCategoryId: _selectedCategoryId,
+                              onCategorySelected: _onCategorySelected,
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
                       ),
                     ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 18)),
 
-                    // Products Grid
+                    // Table Header
+                    if (_products.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(12),
+                              topRight: Radius.circular(12),
+                            ),
+                            child: const ProductTableHeader(),
+                          ),
+                        ),
+                      ),
+
+                    // Products List (SliverList for Lazy Loading)
                     _products.isEmpty
                         ? SliverToBoxAdapter(
                           child: Padding(
@@ -296,25 +323,39 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                             child: _buildEmptyState(),
                           ),
                         )
-                        : SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            child: ProductGrid(
-                              products: _products,
-                              categories: _categories,
-                              onEdit:
-                                  (product) =>
-                                      _showProductDialog(product: product),
-                              onDelete: _deleteProduct,
-                              hasMore: _hasMore,
-                              isLoadingMore: _isLoadingMore,
-                              onCategorySelected:
-                                  _onCategorySelected, // دالة التعامل مع اختيار الفئة
-                              selectedCategoryId:
-                                  _selectedCategoryId, // الفئة المحددة حالياً
-                            ),
-                          ),
+                        : SliverList(
+                          delegate: SliverChildBuilderDelegate((
+                            context,
+                            index,
+                          ) {
+                            if (index == _products.length) {
+                              if (_isLoadingMore) {
+                                return const Padding(
+                                  padding: EdgeInsets.all(16.0),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            }
+                            final product = _products[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                              ),
+                              child: ProductTableRow(
+                                product: product,
+                                categories: _categories,
+                                onEdit: (p) => _showProductDialog(product: p),
+                                onDelete: (id) => _deleteProduct(id),
+                                index: index,
+                              ),
+                            );
+                          }, childCount: _products.length + 1),
                         ),
+
+                    const SliverToBoxAdapter(child: SizedBox(height: 48)),
                   ],
                 ),
               ),
@@ -406,7 +447,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.inventory_2, color: Colors.blue[800]),
+            Icon(Icons.table_chart_outlined, color: Colors.blue[800]),
             const SizedBox(width: 8),
             const Text(
               "قائمة المنتجات",
@@ -425,14 +466,6 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                 color: Colors.grey,
               ),
             ),
-            const Spacer(),
-            if (_selectedCategoryId != null)
-              Chip(
-                label: Text(
-                  'فئة: ${_categories.firstWhere((cat) => cat.id == _selectedCategoryId).name}',
-                ),
-                backgroundColor: Colors.blue[100],
-              ),
           ],
         ),
       ),

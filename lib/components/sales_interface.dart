@@ -27,8 +27,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
   final ProductQueries _productQueries = ProductQueries();
   final CategoryQueries _categoryQueries = CategoryQueries();
   final CustomerQueries _customerQueries = CustomerQueries();
-  final SalesInvoiceService _invoiceService =
-      SalesInvoiceService(); // <-- أضف هذا
+  final SalesInvoiceService _invoiceService = SalesInvoiceService();
 
   List<Product> _products = [];
   List<Category> _categories = [];
@@ -39,7 +38,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
   bool _isProcessingSale = false;
   final Uuid _uuid = const Uuid();
 
-  // متغيرات Lazy Loading
+  // Pagination & Filter Variables
   int _currentPage = 1;
   bool _hasMore = true;
   bool _isLoadingMore = false;
@@ -64,18 +63,24 @@ class _SalesInterfaceState extends State<SalesInterface> {
       if (!mounted) return;
 
       setState(() {
+        // النتيجة الأولى هي void لأن _loadProducts تحدث الـ State داخلياً
+        // لذا نأخذ الفئات والعملاء من النتائج التالية
         _categories = results[1] as List<Category>;
         _customers = results[2] as List<Customer>;
         _isLoading = false;
       });
     } catch (e) {
-      TopAlert.showError(
-        context: context,
-        message: 'خطأ في تحميل البيانات: $e',
-      );
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        TopAlert.showError(
+          context: context,
+          message: 'خطأ في تحميل البيانات: $e',
+        );
+        setState(() => _isLoading = false);
+      }
     }
   }
+
+  // --- دوال البحث والفلترة ---
 
   Future<void> _loadProducts({bool reset = true}) async {
     try {
@@ -93,7 +98,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
         categoryId: _selectedCategoryId,
       );
 
-      // جلب الحزم لكل منتج
+      // تحميل الحزم للمنتجات
       for (var product in products) {
         if (product.id != null) {
           product.packages = await _productQueries.getPackagesForProduct(
@@ -108,7 +113,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
         if (reset) {
           _products = products;
         } else {
-          _products.addAll(products);
+          // دمج القوائم مع التحقق من عدم التكرار
+          final existingIds = _products.map((p) => p.id).toSet();
+          for (var newProduct in products) {
+            if (!existingIds.contains(newProduct.id)) {
+              _products.add(newProduct);
+            }
+          }
         }
         _hasMore = products.length == ProductQueries.pageSize;
         _isLoading = false;
@@ -125,11 +136,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
 
   Future<void> _loadMoreProducts() async {
     if (_isLoadingMore || !_hasMore) return;
-
-    setState(() {
-      _isLoadingMore = true;
-    });
-
+    setState(() => _isLoadingMore = true);
     _currentPage++;
     await _loadProducts(reset: false);
   }
@@ -144,6 +151,8 @@ class _SalesInterfaceState extends State<SalesInterface> {
   void _onCategorySelected(int? categoryId) {
     setState(() {
       _selectedCategoryId = categoryId;
+      // يمكنك تصفير البحث هنا إذا أردت أن يكون الفلتر منفصلاً
+      // _searchTerm = "";
     });
     _loadProducts(reset: true);
   }
@@ -156,18 +165,20 @@ class _SalesInterfaceState extends State<SalesInterface> {
     _loadProducts(reset: true);
   }
 
-  // باقي الدوال تبقى كما هي بدون تغيير...
-  bool _checkStockAvailability(
-    Product product,
-    double quantity,
-    double unitQuantity,
-  ) {
-    final totalQuantityInPieces = quantity * unitQuantity;
-    return totalQuantityInPieces <= product.stock;
-  }
+  // --- دوال السلة والباركود ---
 
-  double _getTotalQuantityInPieces(double quantity, double unitQuantity) {
-    return quantity * unitQuantity;
+  void _handleProductFromBarcode(Product product) {
+    if (product.id == null) return;
+
+    // إضافة المنتج للقائمة المعروضة إذا لم يكن موجوداً (لتحسين تجربة المستخدم)
+    final existsInList = _products.any((p) => p.id == product.id);
+    if (!existsInList) {
+      setState(() {
+        _products.insert(0, product);
+      });
+    }
+
+    _addToCart(product);
   }
 
   void _addToCart(Product product) {
@@ -187,16 +198,15 @@ class _SalesInterfaceState extends State<SalesInterface> {
       if (existingItemIndex != -1) {
         final existingItem = _cartItems[existingItemIndex];
         final newQuantity = existingItem.quantity + 1;
-        final totalPieces = _getTotalQuantityInPieces(
+
+        if (!_checkStockAvailability(
+          product,
           newQuantity,
           existingItem.unitQuantity,
-        );
-
-        if (totalPieces > product.stock) {
+        )) {
           TopAlert.showError(
             context: context,
-            message:
-                'الكمية المطلوبة (${totalPieces.toStringAsFixed(0)} قطعة) تتجاوز المخزون المتاح (${product.stock.toStringAsFixed(0)} قطعة)',
+            message: 'الكمية المطلوبة تتجاوز المخزون المتاح',
           );
           return;
         }
@@ -205,8 +215,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
         if (!_checkStockAvailability(product, 1.0, 1.0)) {
           TopAlert.showError(
             context: context,
-            message:
-                'الكمية المطلوبة (1 قطعة) تتجاوز المخزون المتاح (${product.stock.toStringAsFixed(0)} قطعة)',
+            message: 'الكمية المطلوبة تتجاوز المخزون المتاح',
           );
           return;
         }
@@ -235,11 +244,31 @@ class _SalesInterfaceState extends State<SalesInterface> {
         );
       }
     });
+  }
 
-    TopAlert.showSuccess(
-      context: context,
-      message: 'تمت إضافة ${product.name} إلى السلة',
-    );
+  // دالة مساعدة للحصول على المنتج بأمان (سواء من القائمة أو من السلة كاحتياط)
+  Product _SafeGetProduct(CartItem item) {
+    try {
+      return _products.firstWhere((p) => p.id == item.id);
+    } catch (e) {
+      // إذا لم يكن المنتج في القائمة الحالية (بسبب الفلترة مثلاً)، ننشئ كائناً من بيانات السلة
+      return Product(
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        stock: item.stock, // نعتمد على المخزون المسجل لحظة الإضافة
+        // يمكن هنا إضافة استعلام قاعدة بيانات للحصول على المخزون المحدث إذا لزم الأمر
+      );
+    }
+  }
+
+  bool _checkStockAvailability(
+    Product product,
+    double quantity,
+    double unitQuantity,
+  ) {
+    final totalQuantityInPieces = quantity * unitQuantity;
+    return totalQuantityInPieces <= product.stock;
   }
 
   void _updateCartItemUnit(
@@ -253,41 +282,32 @@ class _SalesInterfaceState extends State<SalesInterface> {
       );
       if (itemIndex != -1) {
         final item = _cartItems[itemIndex];
-        final product = _products.firstWhere((p) => p.id == item.id);
+        final product = _SafeGetProduct(item); // استخدام الدالة الآمنة
 
         double newQuantity;
-
         if (resetQuantity) {
-          // إذا بدنا نعيد الكمية لـ 1
           newQuantity = 1.0;
         } else {
-          // نحافظ على نفس عدد القطع الكلي
           final currentTotalPieces = item.quantity * item.unitQuantity;
           newQuantity = currentTotalPieces / newPackage.containedQuantity;
-
-          // إذا الناتج بيكون كسر، نعمله تقريب
           if (newQuantity != newQuantity.roundToDouble()) {
-            newQuantity =
-                newQuantity.ceilToDouble(); // أو roundToDouble() حسب ما تفضل
+            newQuantity = newQuantity.ceilToDouble();
           }
         }
 
         final totalPieces = newQuantity * newPackage.containedQuantity;
-
         if (totalPieces > product.stock) {
           TopAlert.showError(
             context: context,
-            message:
-                'الكمية المطلوبة (${totalPieces.toStringAsFixed(0)} قطعة) تتجاوز المخزون المتاح (${product.stock.toStringAsFixed(0)} قطعة)',
+            message: 'الكمية تتجاوز المخزون (${product.stock.toInt()})',
           );
           return;
         }
 
-        // التحديث
         item.name = product.name;
         item.unitName = newPackage.name;
         item.price = newPackage.price;
-        item.unitQuantity = newPackage.containedQuantity; // ⬅️ هذا السليم
+        item.unitQuantity = newPackage.containedQuantity;
         item.quantity = newQuantity;
       }
     });
@@ -305,18 +325,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
       );
       if (itemIndex != -1) {
         final item = _cartItems[itemIndex];
-        final product = _products.firstWhere((p) => p.id == item.id);
+        final product = _SafeGetProduct(item); // استخدام الدالة الآمنة
 
-        final totalPieces = _getTotalQuantityInPieces(
-          newQuantity,
-          item.unitQuantity,
-        );
-
+        final totalPieces = newQuantity * item.unitQuantity;
         if (totalPieces > product.stock) {
           TopAlert.showError(
             context: context,
-            message:
-                'الكمية المطلوبة (${totalPieces.toStringAsFixed(0)} قطعة) تتجاوز المخزون المتاح (${product.stock.toStringAsFixed(0)} قطعة)',
+            message: 'الكمية تتجاوز المخزون (${product.stock.toInt()})',
           );
           return;
         }
@@ -333,17 +348,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
 
   bool _validateStockBeforeCheckout() {
     for (final cartItem in _cartItems) {
-      final product = _products.firstWhere((p) => p.id == cartItem.id);
-      final totalPieces = _getTotalQuantityInPieces(
-        cartItem.quantity,
-        cartItem.unitQuantity,
-      );
+      final product = _SafeGetProduct(cartItem); // استخدام الدالة الآمنة
 
+      final totalPieces = cartItem.quantity * cartItem.unitQuantity;
       if (totalPieces > product.stock) {
         TopAlert.showError(
           context: context,
-          message:
-              'الكمية المطلوبة لـ ${product.name} (${totalPieces.toStringAsFixed(0)} قطعة) تتجاوز المخزون المتاح (${product.stock.toStringAsFixed(0)} قطعة)',
+          message: 'الكمية لـ ${product.name} تتجاوز المخزون المتاح',
         );
         return false;
       }
@@ -357,20 +368,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
       return;
     }
 
-    if (!_validateStockBeforeCheckout()) {
-      return;
-    }
+    if (!_validateStockBeforeCheckout()) return;
 
     try {
+      // تحديث قائمة العملاء (اختياري)
       final updatedCustomers = await _customerQueries.getAllCustomers();
-      if (mounted) {
-        setState(() {
-          _customers = updatedCustomers;
-        });
-      }
-    } catch (e) {
-      // تجاهل الخطأ مؤقتاً والمتابعة
-    }
+      if (mounted) setState(() => _customers = updatedCustomers);
+    } catch (_) {}
 
     final total = _cartItems.fold(
       0.0,
@@ -383,9 +387,7 @@ class _SalesInterfaceState extends State<SalesInterface> {
           (context) => PaymentDialog(totalAmount: total, customers: _customers),
     );
 
-    if (paymentResult == null) {
-      return;
-    }
+    if (paymentResult == null) return;
 
     try {
       setState(() => _isProcessingSale = true);
@@ -400,7 +402,6 @@ class _SalesInterfaceState extends State<SalesInterface> {
         return;
       }
 
-      // تحويل CartItem إلى SaleInvoiceItem
       final List<SaleInvoiceItem> invoiceItems =
           _cartItems.map((cartItem) {
             return SaleInvoiceItem(
@@ -411,16 +412,13 @@ class _SalesInterfaceState extends State<SalesInterface> {
               quantity: cartItem.quantity,
               total: cartItem.price * cartItem.quantity,
               unitQuantity: cartItem.unitQuantity,
-              unitName: cartItem.unitName, // ⬅️ اسم الحزمة من السلة
+              unitName: cartItem.unitName,
             );
           }).toList();
 
-      // إنشاء رقم فاتورة فريد
       final now = DateTime.now();
-      final invoiceNumber =
-          'INV-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+      final invoiceNumber = 'INV-${now.millisecondsSinceEpoch}';
 
-      // استدعاء الدالة بشكل صحيح
       final invoice = await _invoiceService.createInvoice(
         invoiceNumber: invoiceNumber,
         date:
@@ -431,28 +429,23 @@ class _SalesInterfaceState extends State<SalesInterface> {
         total: total,
         paidAmount: paidAmount,
         remainingAmount: remainingAmount,
-        cashier: "كاشير", // يمكنك تغيير هذا لاسم المستخدم الحالي
+        cashier: "Admin",
         customerId: customerId,
         paymentMethod: paymentMethod,
       );
 
       TopAlert.showSuccess(
         context: context,
-        message:
-            'تمت عملية البيع بنجاح - رقم الفاتورة: ${invoice.invoiceNumber}',
+        message: 'تم البيع بنجاح - ${invoice.invoiceNumber}',
       );
 
+      // إعادة تحميل البيانات وتفريغ السلة
       await _refreshData();
-      setState(() {
-        _cartItems.clear();
-      });
+      setState(() => _cartItems.clear());
     } catch (e) {
-      TopAlert.showError(context: context, message: 'خطأ في إتمام البيع: $e');
-      rethrow;
+      TopAlert.showError(context: context, message: 'خطأ: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isProcessingSale = false);
-      }
+      if (mounted) setState(() => _isProcessingSale = false);
     }
   }
 
@@ -460,22 +453,21 @@ class _SalesInterfaceState extends State<SalesInterface> {
   Widget build(BuildContext context) {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 24, 24, 24),
+      padding: const EdgeInsets.all(16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // المنتجات (50% من الشاشة)
           Expanded(
-            flex: 2, // كان 2
+            flex: 2,
             child: Column(
               children: [
                 BarcodeReader(
-                  onProductScanned: _addToCart,
+                  onProductScanned: _handleProductFromBarcode,
                   products: _products,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Expanded(
-                  child: ProductsGrid(
+                  child: ProductsTable(
                     products: _products,
                     categories: _categories,
                     onProductAdded: _addToCart,
@@ -492,10 +484,9 @@ class _SalesInterfaceState extends State<SalesInterface> {
               ],
             ),
           ),
-          const SizedBox(width: 16),
-          // السلة (50% من الشاشة)
+          const SizedBox(width: 12),
           Expanded(
-            flex: 2, // كان 1 - تغييرها لـ 2 لتكون 50%-50%
+            flex: 2,
             child: ShoppingCart(
               cartItems: _cartItems,
               products: _products,
