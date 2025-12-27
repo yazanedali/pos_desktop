@@ -13,6 +13,9 @@ class ProductTableHeader extends StatelessWidget {
       ),
       child: const Row(
         children: [
+          // الرقم التسلسلي (عنوان مخفي)
+          SizedBox(width: 56),
+
           Expanded(
             flex: 2,
             child: Text(
@@ -20,20 +23,35 @@ class ProductTableHeader extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
             ),
           ),
+          SizedBox(width: 16),
+
           Expanded(
             flex: 1,
             child: Text(
-              'الباركود',
+              'الكمية',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
             ),
           ),
+          SizedBox(width: 16),
+
           Expanded(
             flex: 1,
             child: Text(
-              'السعر',
+              'سعر الشراء',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
             ),
           ),
+          SizedBox(width: 16),
+
+          Expanded(
+            flex: 1,
+            child: Text(
+              'سعر البيع',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+            ),
+          ),
+          SizedBox(width: 16),
+
           Expanded(
             flex: 1,
             child: Text(
@@ -42,7 +60,7 @@ class ProductTableHeader extends StatelessWidget {
             ),
           ),
           SizedBox(
-            width: 80,
+            width: 100,
             child: Text(
               'إجراءات',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:pos_desktop/components/multi_tab_sales_page.dart';
 import '../components/product_management_page.dart';
-import '../components/sales_interface.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
 import '../components/reports_section.dart';
-import '../components/customers_and_suppliers_page.dart'; // <-- Modified
+import '../components/customers_and_suppliers_page.dart';
 
 class IndexPage extends StatefulWidget {
   const IndexPage({super.key});
@@ -19,7 +19,7 @@ class _IndexPageState extends State<IndexPage> {
   // الخطوة 2: إضافة الصفحة الجديدة إلى قائمة الصفحات
   final List<Widget> _pages = [
     const ProductManagementPage(),
-    const SalesInterface(),
+    const MultiTabSalesPage(), // <-- التغيير صار هنا بدل SalesInterface()
     const SalesInvoices(),
     const PurchaseInvoices(),
     const ReportsSection(),

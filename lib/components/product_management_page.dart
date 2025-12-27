@@ -11,6 +11,16 @@ import '../widgets/product_table_header.dart';
 import '../widgets/product_table_row.dart';
 import '../widgets/top_alert.dart';
 
+enum StockFilterOption {
+  all('الكل'),
+  outOfStock('نفذ من المخزون'),
+  lowStock('مخزون منخفض'),
+  inStock('متوفر بالمخزون');
+
+  final String label;
+  const StockFilterOption(this.label);
+}
+
 class ProductManagementPage extends StatefulWidget {
   const ProductManagementPage({super.key});
 
@@ -34,6 +44,10 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
 
   // متغيرات الفلترة
   int? _selectedCategoryId;
+  StockFilterOption _selectedStockFilter = StockFilterOption.all;
+
+  // متغيرات للإحصائيات
+  double _totalPurchaseValue = 0.0;
 
   @override
   void initState() {
@@ -90,11 +104,28 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
         });
       }
 
+      // تحديد فلتر المخزون للاستعلام
+      String? stockFilter;
+      switch (_selectedStockFilter) {
+        case StockFilterOption.outOfStock:
+          stockFilter = 'out';
+          break;
+        case StockFilterOption.lowStock:
+          stockFilter = 'low';
+          break;
+        case StockFilterOption.inStock:
+          stockFilter = 'in';
+          break;
+        case StockFilterOption.all:
+          stockFilter = null;
+      }
+
       final products = await _productQueries.getProductsPaginated(
         page: _currentPage,
         searchTerm:
             _searchController.text.isNotEmpty ? _searchController.text : null,
         categoryId: _selectedCategoryId,
+        stockFilter: stockFilter,
       );
 
       // الحصول على العدد الكلي للمنتجات (مع الفلترة)
@@ -102,6 +133,15 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
         searchTerm:
             _searchController.text.isNotEmpty ? _searchController.text : null,
         categoryId: _selectedCategoryId,
+        stockFilter: stockFilter,
+      );
+
+      // الحصول على إجمالي سعر الشراء لجميع المنتجات (مع الفلاتر)
+      final totalPurchase = await _productQueries.getTotalPurchaseValue(
+        searchTerm:
+            _searchController.text.isNotEmpty ? _searchController.text : null,
+        categoryId: _selectedCategoryId,
+        stockFilter: stockFilter,
       );
 
       if (!mounted) return;
@@ -113,6 +153,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
           _products.addAll(products);
         }
         _totalProductsCount = totalCount;
+        _totalPurchaseValue = totalPurchase;
         _hasMore = products.length == ProductQueries.pageSize;
         _isLoading = false;
         _isLoadingMore = false;
@@ -245,9 +286,24 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
   void _clearFilters() {
     setState(() {
       _selectedCategoryId = null;
+      _selectedStockFilter = StockFilterOption.all;
       _searchController.clear();
     });
     _loadProducts(reset: true);
+  }
+
+  // دالة مساعدة للحصول على أيقونة فلتر المخزون
+  IconData _getStockFilterIcon(StockFilterOption option) {
+    switch (option) {
+      case StockFilterOption.outOfStock:
+        return Icons.error_outline;
+      case StockFilterOption.lowStock:
+        return Icons.warning_amber_outlined;
+      case StockFilterOption.inStock:
+        return Icons.check_circle_outline;
+      default:
+        return Icons.all_inbox;
+    }
   }
 
   @override
@@ -295,10 +351,21 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                               onCategorySelected: _onCategorySelected,
                             ),
                             const SizedBox(height: 16),
+                            // فلتر المخزون تحت فلتر الفئة
+                            _buildStockFilterSection(),
                           ],
                         ),
                       ),
                     ),
+
+                    // بطاقة سعر الشراء الصغيرة فوق الجدول
+                    if (_products.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: _buildPurchasePriceCard(),
+                        ),
+                      ),
 
                     // Table Header
                     if (_products.isNotEmpty)
@@ -414,25 +481,6 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            if (_selectedCategoryId != null ||
-                _searchController.text.isNotEmpty)
-              Row(
-                children: [
-                  Text(
-                    'فلترة مفعلة',
-                    style: TextStyle(
-                      color: Colors.orange[700],
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: _clearFilters,
-                    child: const Text('مسح الفلترة'),
-                  ),
-                ],
-              ),
           ],
         ),
       ),
@@ -440,31 +488,133 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
   }
 
   Widget _buildProductsHeader() {
+    return Column(
+      children: [
+        // بطاقة عدد المنتجات فقط
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.table_chart_outlined, color: Colors.blue[800]),
+                const SizedBox(width: 8),
+                const Text(
+                  "قائمة المنتجات",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "$_totalProductsCount",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // فلتر المخزون كقسم منفصل
+  Widget _buildStockFilterSection() {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.table_chart_outlined, color: Colors.blue[800]),
-            const SizedBox(width: 8),
-            const Text(
-              "قائمة المنتجات",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
-              ),
+            Row(
+              children: [
+                Icon(Icons.inventory_2_outlined, size: 18, color: Colors.blue),
+                const SizedBox(width: 8),
+                const Text(
+                  'فلترة حسب المخزون',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.blue,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              "($_totalProductsCount)",
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children:
+                  StockFilterOption.values.map((option) {
+                    bool isSelected = _selectedStockFilter == option;
+                    Color color;
+
+                    switch (option) {
+                      case StockFilterOption.outOfStock:
+                        color = Colors.red;
+                        break;
+                      case StockFilterOption.lowStock:
+                        color = Colors.orange;
+                        break;
+                      case StockFilterOption.inStock:
+                        color = Colors.green;
+                        break;
+                      default:
+                        color = Colors.blue;
+                    }
+
+                    return FilterChip(
+                      label: Text(option.label),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setState(() {
+                          _selectedStockFilter = option;
+                        });
+                        _loadProducts(reset: true);
+                      },
+                      backgroundColor:
+                          isSelected ? color.withOpacity(0.2) : Colors.white,
+                      selectedColor: color.withOpacity(0.3),
+                      checkmarkColor: color,
+                      labelStyle: TextStyle(
+                        color: isSelected ? color : Colors.grey[700],
+                        fontWeight: FontWeight.bold,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(
+                          color: isSelected ? color : Colors.grey[300]!,
+                          width: 1,
+                        ),
+                      ),
+                      avatar: Icon(
+                        _getStockFilterIcon(option),
+                        size: 16,
+                        color: isSelected ? color : Colors.grey,
+                      ),
+                    );
+                  }).toList(),
             ),
           ],
         ),
@@ -472,8 +622,53 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
     );
   }
 
+  // بطاقة سعر الشراء الصغيرة فوق الجدول
+  Widget _buildPurchasePriceCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.purple[50],
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.purple[200]!, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.purple.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.paid_outlined, size: 18, color: Colors.purple[700]),
+          const SizedBox(width: 8),
+          Text(
+            "إجمالي سعر الشراء: ",
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.purple[700],
+            ),
+          ),
+          Text(
+            "${_totalPurchaseValue.toStringAsFixed(2)} شيكل",
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.purple,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
-    if (_searchController.text.isNotEmpty || _selectedCategoryId != null) {
+    if (_searchController.text.isNotEmpty ||
+        _selectedCategoryId != null ||
+        _selectedStockFilter != StockFilterOption.all) {
       return const EmptyStateWidget(
         icon: Icons.search_off,
         title: "لا توجد نتائج مطابقة",

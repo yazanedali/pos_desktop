@@ -23,7 +23,8 @@ class SalesInterface extends StatefulWidget {
   State<SalesInterface> createState() => _SalesInterfaceState();
 }
 
-class _SalesInterfaceState extends State<SalesInterface> {
+class _SalesInterfaceState extends State<SalesInterface>
+    with AutomaticKeepAliveClientMixin {
   final ProductQueries _productQueries = ProductQueries();
   final CategoryQueries _categoryQueries = CategoryQueries();
   final CustomerQueries _customerQueries = CustomerQueries();
@@ -44,6 +45,9 @@ class _SalesInterfaceState extends State<SalesInterface> {
   bool _isLoadingMore = false;
   String _searchTerm = "";
   int? _selectedCategoryId;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -451,6 +455,8 @@ class _SalesInterfaceState extends State<SalesInterface> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     return Padding(
       padding: const EdgeInsets.all(16),

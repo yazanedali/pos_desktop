@@ -7,7 +7,7 @@ class ProductTableRow extends StatelessWidget {
   final List<Category> categories;
   final Function(Product) onEdit;
   final Function(int) onDelete;
-  final int index; // إضافة الفهرس للترقيم التسلسلي
+  final int index;
 
   const ProductTableRow({
     super.key,
@@ -24,6 +24,38 @@ class ProductTableRow extends StatelessWidget {
     return Color(int.parse(hex, radix: 16));
   }
 
+  // دالة لتحديد لون الكمية بناءً على المخزون
+  Color _getStockColor() {
+    if (product.stock <= 0) {
+      return Colors.red;
+    } else if (product.stock < 10) {
+      return Colors.orange;
+    }
+    return Colors.green;
+  }
+
+  // دالة لتحديد خلفية وخلفية نص الكمية
+  Color _getStockBackgroundColor() {
+    if (product.stock <= 0) {
+      return Colors.red.withOpacity(0.1);
+    } else if (product.stock < 10) {
+      return Colors.orange.withOpacity(0.1);
+    }
+    return Colors.green.withOpacity(0.1);
+  }
+
+  // دالة لتحديد نص التحذير للمخزون المنخفض
+  String? _getStockWarning() {
+    if (product.stock <= 0) {
+      return 'نفذ من المخزون';
+    } else if (product.stock < 5) {
+      return 'مخزون منخفض جداً';
+    } else if (product.stock < 10) {
+      return 'مخزون منخفض';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final category =
@@ -35,6 +67,9 @@ class ProductTableRow extends StatelessWidget {
             : Category(name: 'غير مصنف', color: 'CCCCCC');
 
     final categoryColor = _hexToColor(category.color);
+    final stockColor = _getStockColor();
+    final stockBgColor = _getStockBackgroundColor();
+    final stockWarning = _getStockWarning();
 
     return Container(
       decoration: BoxDecoration(
@@ -100,40 +135,117 @@ class ProductTableRow extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (product.barcode != null &&
+                          product.barcode!.isNotEmpty)
+                        const SizedBox(height: 4),
+                      if (product.barcode != null &&
+                          product.barcode!.isNotEmpty)
+                        Text(
+                          product.barcode!,
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                     ],
                   ),
                 ),
 
-                // الباركود
+                const SizedBox(width: 16),
+
+                // الكمية مع التنبيهات
+                Expanded(
+                  flex: 1,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: stockBgColor,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: stockColor.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                _getStockIcon(),
+                                size: 14,
+                                color: stockColor,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                product.stock.toStringAsFixed(1),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: stockColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (stockWarning != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            stockWarning,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: stockColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 16),
+
+                // سعر الشراء
                 Expanded(
                   flex: 1,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 4,
+                      vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.grey[300]!),
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
                     ),
-                    child: Text(
-                      product.barcode ?? '-',
-                      style: TextStyle(
-                        color: Colors.grey[800],
-                        fontSize: 12,
-                        fontFamily: 'monospace',
+                    child: Center(
+                      child: Text(
+                        '${product.purchasePrice.toStringAsFixed(2)} ش',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Colors.blue,
+                        ),
                       ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
 
                 const SizedBox(width: 16),
 
-                // السعر
+                // السعر (البيع)
                 Expanded(
                   flex: 1,
                   child: Container(
@@ -148,7 +260,7 @@ class ProductTableRow extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text(
-                        '${product.price.toStringAsFixed(2)} د.أ',
+                        '${product.price.toStringAsFixed(2)} ش',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
@@ -249,5 +361,15 @@ class ProductTableRow extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  // دالة لإرجاع الأيقونة المناسبة بناءً على المخزون
+  IconData _getStockIcon() {
+    if (product.stock <= 0) {
+      return Icons.error_outline;
+    } else if (product.stock < 10) {
+      return Icons.warning_amber_outlined;
+    }
+    return Icons.check_circle_outline;
   }
 }

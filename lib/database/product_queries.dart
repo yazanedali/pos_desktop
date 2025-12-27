@@ -21,6 +21,65 @@ class ProductQueries {
     return rows.map((r) => r['barcode'] as String).toList();
   }
 
+  // دالة لحساب إجمالي سعر الشراء لجميع المنتجات (مع الفلاتر)
+  Future<double> getTotalPurchaseValue({
+    String? searchTerm,
+    int? categoryId,
+    String? stockFilter,
+  }) async {
+    final db = await dbHelper.database;
+
+    final conditions = <String>['p.is_active = 1'];
+    final args = <Object>[];
+
+    if (searchTerm != null && searchTerm.isNotEmpty) {
+      conditions.add(
+        '(p.name LIKE ? OR p.barcode LIKE ? OR pb.barcode LIKE ? OR c.name LIKE ?)',
+      );
+      args.addAll([
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+        '%$searchTerm%',
+      ]);
+    }
+
+    if (categoryId != null) {
+      conditions.add('p.category_id = ?');
+      args.add(categoryId);
+    }
+
+    // إضافة فلتر المخزون
+    if (stockFilter != null) {
+      switch (stockFilter) {
+        case 'out':
+          conditions.add('p.stock <= 0');
+          break;
+        case 'low':
+          conditions.add('p.stock > 0 AND p.stock < 10');
+          break;
+        case 'in':
+          conditions.add('p.stock > 0');
+          break;
+      }
+    }
+
+    final whereClause = conditions.join(' AND ');
+
+    // استعلام لحساب إجمالي سعر الشراء
+    final result = await db.rawQuery('''
+    SELECT 
+      SUM(p.purchase_price * p.stock) as total_purchase
+    FROM products p 
+    LEFT JOIN categories c ON p.category_id = c.id 
+    LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+    WHERE $whereClause
+  ''', args);
+
+    final total = result.first['total_purchase'];
+    return total is double ? total : (total as num?)?.toDouble() ?? 0.0;
+  }
+
   /// جلب الحزم (Packages) لمنتج معين
   Future<List<ProductPackage>> getPackagesForProduct(int productId) async {
     final db = await dbHelper.database;
@@ -337,6 +396,7 @@ class ProductQueries {
     required int page,
     String? searchTerm,
     int? categoryId,
+    String? stockFilter, // 'out', 'low', 'in'
   }) async {
     final db = await dbHelper.database;
     final offset = (page - 1) * pageSize;
@@ -345,7 +405,6 @@ class ProductQueries {
     final args = <Object>[];
 
     if (searchTerm != null && searchTerm.isNotEmpty) {
-      // ✅ تمت إضافة pb.barcode للبحث
       conditions.add(
         '(p.name LIKE ? OR p.barcode LIKE ? OR pb.barcode LIKE ? OR c.name LIKE ?)',
       );
@@ -362,28 +421,43 @@ class ProductQueries {
       args.add(categoryId);
     }
 
+    // إضافة فلتر المخزون
+    if (stockFilter != null) {
+      switch (stockFilter) {
+        case 'out':
+          conditions.add('p.stock <= 0');
+          break;
+        case 'low':
+          conditions.add('p.stock > 0 AND p.stock < 10');
+          break;
+        case 'in':
+          conditions.add('p.stock > 0');
+          break;
+      }
+    }
+
     final whereClause = conditions.join(' AND ');
 
     final results = await db.rawQuery('''
-      SELECT 
-        p.id,
-        p.name,
-        p.price,
-        p.purchase_price,
-        p.stock,
-        p.barcode,
-        p.created_at,
-        c.name as category,
-        c.color as category_color,
-        c.id as category_id
-      FROM products p 
-      LEFT JOIN categories c ON p.category_id = c.id 
-      LEFT JOIN product_barcodes pb ON pb.product_id = p.id
-      WHERE $whereClause
-      GROUP BY p.id -- ✅ ضروري جداً لمنع التكرار عند وجود عدة باركودات
-      ORDER BY p.created_at DESC
-      LIMIT $pageSize OFFSET $offset
-    ''', args);
+    SELECT 
+      p.id,
+      p.name,
+      p.price,
+      p.purchase_price,
+      p.stock,
+      p.barcode,
+      p.created_at,
+      c.name as category,
+      c.color as category_color,
+      c.id as category_id
+    FROM products p 
+    LEFT JOIN categories c ON p.category_id = c.id 
+    LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+    WHERE $whereClause
+    GROUP BY p.id
+    ORDER BY p.created_at DESC
+    LIMIT $pageSize OFFSET $offset
+  ''', args);
 
     final products = results.map((map) => Product.fromMap(map)).toList();
     for (var p in products) {
@@ -394,7 +468,11 @@ class ProductQueries {
     return products;
   }
 
-  Future<int> getProductsCount({String? searchTerm, int? categoryId}) async {
+  Future<int> getProductsCount({
+    String? searchTerm,
+    int? categoryId,
+    String? stockFilter,
+  }) async {
     final db = await dbHelper.database;
 
     final conditions = <String>['p.is_active = 1'];
@@ -417,16 +495,31 @@ class ProductQueries {
       args.add(categoryId);
     }
 
+    // إضافة فلتر المخزون
+    if (stockFilter != null) {
+      switch (stockFilter) {
+        case 'out':
+          conditions.add('p.stock <= 0');
+          break;
+        case 'low':
+          conditions.add('p.stock > 0 AND p.stock < 10');
+          break;
+        case 'in':
+          conditions.add('p.stock > 0');
+          break;
+      }
+    }
+
     final whereClause = conditions.join(' AND ');
 
     final result = await db.rawQuery('''
-      SELECT 
-        COUNT(DISTINCT p.id) AS count -- ✅ عد المنتجات الفريدة فقط
-      FROM products p 
-      LEFT JOIN categories c ON p.category_id = c.id 
-      LEFT JOIN product_barcodes pb ON pb.product_id = p.id
-      WHERE $whereClause
-    ''', args);
+    SELECT 
+      COUNT(DISTINCT p.id) AS count
+    FROM products p 
+    LEFT JOIN categories c ON p.category_id = c.id 
+    LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+    WHERE $whereClause
+  ''', args);
 
     return result.first['count'] as int? ?? 0;
   }
