@@ -8,7 +8,7 @@ import 'package:pos_desktop/models/product_package.dart';
 import 'package:pos_desktop/models/sales_invoice.dart';
 import 'package:pos_desktop/services/sales_invoice_service.dart';
 import '../services/cash_service.dart';
-import './sales/barcode_reader.dart';
+
 import './sales/products_grid.dart';
 import './sales/shopping_cart.dart';
 import '../widgets/top_alert.dart';
@@ -49,6 +49,7 @@ class _SalesInterfaceState extends State<SalesInterface>
   bool _isLoadingMore = false;
   String _searchTerm = "";
   int? _selectedCategoryId;
+  int _refreshKey = 0; // مفتاح لتجربة إعادة بناء الحقول عند حدوث خطأ في السعر
 
   @override
   bool get wantKeepAlive => true;
@@ -377,6 +378,7 @@ class _SalesInterfaceState extends State<SalesInterface>
         final minAllowedPrice = item.purchasePrice * item.unitQuantity;
 
         if (newPrice < minAllowedPrice) {
+          _refreshKey++; // زيادة المفتاح لإجبار الحقول على إعادة البناء والعودة للسعر الأصلي
           TopAlert.showError(
             context: context,
             message:
@@ -401,6 +403,7 @@ class _SalesInterfaceState extends State<SalesInterface>
       );
 
       if (newTotal < totalPurchaseCost) {
+        _refreshKey++; // زيادة المفتاح لإجبار الحقول على إعادة البناء والعودة للإجمالي الأصلي
         TopAlert.showError(
           context: context,
           message:
@@ -598,6 +601,7 @@ class _SalesInterfaceState extends State<SalesInterface>
                   onTotalUpdated: _updateCustomTotal,
                   customTotal: _customTotal,
                   isLoading: _isProcessingSale,
+                  refreshKey: _refreshKey,
                 ),
               ),
             ],

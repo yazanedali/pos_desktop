@@ -15,6 +15,7 @@ class ShoppingCart extends StatefulWidget {
   final Function(double) onTotalUpdated;
   final bool isLoading;
   final double? customTotal;
+  final int refreshKey;
 
   const ShoppingCart({
     super.key,
@@ -28,6 +29,7 @@ class ShoppingCart extends StatefulWidget {
     required this.onTotalUpdated,
     this.customTotal,
     this.isLoading = false,
+    this.refreshKey = 0,
   });
 
   @override
@@ -303,70 +305,68 @@ class _ShoppingCartState extends State<ShoppingCart> {
           // 2. السعر والوحدة
           Expanded(
             flex: 3,
-            child: Focus(
-              descendantsAreFocusable: false,
-              skipTraversal: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // قائمة الوحدات (ارتفاع أقل)
-                  Container(
-                    height: 26, // ✅ تم التقليل من 30 إلى 26
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: _lightBlueBg,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: item.unitName,
-                        isExpanded: true,
-                        focusNode: FocusNode(canRequestFocus: false),
-                        icon: Icon(
-                          Icons.keyboard_arrow_down,
-                          size: 14,
-                          color: _primaryBlue,
-                        ),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: _primaryBlue,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        items:
-                            availablePackages
-                                .map(
-                                  (p) => DropdownMenuItem(
-                                    value: p.name,
-                                    enabled:
-                                        product.stock >= p.containedQuantity,
-                                    child: Text(p.name),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (val) {
-                          if (val != null && val != item.unitName) {
-                            widget.onUnitChanged(
-                              item.cartItemId,
-                              availablePackages.firstWhere(
-                                (p) => p.name == val,
-                              ),
-                              false,
-                            );
-                          }
-                        },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // قائمة الوحدات (ارتفاع أقل)
+                Container(
+                  height: 26, // ✅ تم التقليل من 30 إلى 26
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: _lightBlueBg,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: item.unitName,
+                      isExpanded: true,
+                      focusNode: FocusNode(canRequestFocus: false),
+                      icon: Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 14,
+                        color: _primaryBlue,
                       ),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _primaryBlue,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      items:
+                          availablePackages
+                              .map(
+                                (p) => DropdownMenuItem(
+                                  value: p.name,
+                                  enabled: product.stock >= p.containedQuantity,
+                                  child: Text(p.name),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (val) {
+                        if (val != null && val != item.unitName) {
+                          widget.onUnitChanged(
+                            item.cartItemId,
+                            availablePackages.firstWhere((p) => p.name == val),
+                            false,
+                          );
+                        }
+                      },
                     ),
                   ),
+                ),
 
-                  const SizedBox(height: 2), // مسافة صغيرة جداً
-                  // حقل السعر
-                  SizedBox(
-                    width: 80,
-                    height: 20, // ✅ ارتفاع صغير للسعر
+                const SizedBox(height: 2),
+                // حقل السعر
+                SizedBox(
+                  width: 80,
+                  height: 20, // ✅ ارتفاع صغير للسعر
+                  child: FocusTraversalOrder(
+                    order: NumericFocusOrder(2.5 + index),
                     child: TextFormField(
+                      key: ValueKey(
+                        '${item.cartItemId}_${item.price}_${widget.refreshKey}',
+                      ),
                       initialValue: item.price.toStringAsFixed(2),
-                      focusNode: FocusNode(canRequestFocus: false),
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -389,8 +389,8 @@ class _ShoppingCartState extends State<ShoppingCart> {
                           ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
 
@@ -541,13 +541,13 @@ class _ShoppingCartState extends State<ShoppingCart> {
                 ),
                 SizedBox(
                   width: 200,
-                  child: Focus(
-                    descendantsAreFocusable: false,
-                    skipTraversal: true,
+                  child: FocusTraversalOrder(
+                    order: const NumericFocusOrder(999),
                     child: TextFormField(
-                      key: ValueKey(total),
+                      key: ValueKey(
+                        '${total.toStringAsFixed(2)}_${widget.refreshKey}',
+                      ),
                       initialValue: total.toStringAsFixed(2),
-                      focusNode: FocusNode(canRequestFocus: false),
                       style: const TextStyle(
                         fontSize: 24, // تصغير الخط قليلاً
                         fontWeight: FontWeight.w900,
