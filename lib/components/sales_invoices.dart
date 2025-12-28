@@ -498,10 +498,11 @@ class _SalesInvoicesState extends State<SalesInvoices> {
         const SizedBox(height: 8),
         Row(
           children: [
+            // ✅ **تغيير متوسط الفاتورة إلى صافي ربح اليوم**
             _buildStatItem(
-              'متوسط الفاتورة',
-              '${(_statistics['averageInvoice'] ?? 0.0).toStringAsFixed(2)} شيكل',
-              Icons.analytics,
+              'صافي ربح اليوم', // ✅ العنوان الجديد
+              '${(_statistics['todayNetProfit'] ?? 0.0).toStringAsFixed(2)} شيكل', // ✅ استخدام todayNetProfit
+              Icons.trending_up, // ✅ أيقونة مختلفة
               Colors.orange,
             ),
             const SizedBox(width: 16),

@@ -5,6 +5,7 @@ import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
 import '../components/reports_section.dart';
 import '../components/customers_and_suppliers_page.dart';
+import '../components/cash_management_page.dart';
 
 class IndexPage extends StatefulWidget {
   const IndexPage({super.key});
@@ -24,6 +25,7 @@ class _IndexPageState extends State<IndexPage> {
     const PurchaseInvoices(),
     const ReportsSection(),
     const CustomersAndSuppliersPage(), // <-- Modified
+    const CashManagementPage(), // <-- New Page (7th)
   ];
 
   // الخطوة 3: إضافة عنوان الصفحة الجديدة
@@ -34,6 +36,7 @@ class _IndexPageState extends State<IndexPage> {
     'فواتير الشراء',
     'التقارير',
     'العملاء والموردين', // <-- Modified
+    'الصندوق', // <-- New Title
   ];
 
   // الخطوة 4: إضافة أيقونة الصفحة الجديدة
@@ -44,6 +47,7 @@ class _IndexPageState extends State<IndexPage> {
     Icons.shopping_bag_outlined,
     Icons.analytics_outlined,
     Icons.people_alt_outlined,
+    Icons.account_balance_wallet_outlined,
   ];
 
   @override
@@ -53,7 +57,7 @@ class _IndexPageState extends State<IndexPage> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
+            // _buildHeader(),
             _buildCustomNavigationBar(),
             Expanded(
               child: Padding(
@@ -68,90 +72,90 @@ class _IndexPageState extends State<IndexPage> {
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // --- الجزء الأيسر: حالة المتجر ---
-          Row(
-            children: [
-              _buildStatusChip("متصل", Colors.green[100]!, Colors.green[800]!),
-              const SizedBox(width: 12),
-              _buildStatusChip(
-                "المتجر الرئيسي",
-                Colors.grey[200]!,
-                Colors.grey[800]!,
-              ),
-            ],
-          ),
-          // --- الجزء الأيمن: شعار واسم النظام ---
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text(
-                    "نظام نقطة البيع",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A2B4D),
-                    ),
-                  ),
-                  Text(
-                    "إدارة ذكية للمبيعات والمخزون",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 16),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: const Icon(
-                  Icons.calculate_outlined,
-                  color: Colors.white,
-                  size: 24,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // Widget _buildHeader() {
+  //   return Container(
+  //     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+  //     decoration: BoxDecoration(
+  //       color: Colors.white,
+  //       border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+  //     ),
+  //     child: Row(
+  //       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  //       children: [
+  //         // --- الجزء الأيسر: حالة المتجر ---
+  //         Row(
+  //           children: [
+  //             _buildStatusChip("متصل", Colors.green[100]!, Colors.green[800]!),
+  //             const SizedBox(width: 12),
+  //             _buildStatusChip(
+  //               "المتجر الرئيسي",
+  //               Colors.grey[200]!,
+  //               Colors.grey[800]!,
+  //             ),
+  //           ],
+  //         ),
+  //         // --- الجزء الأيمن: شعار واسم النظام ---
+  //         Row(
+  //           children: [
+  //             Column(
+  //               crossAxisAlignment: CrossAxisAlignment.end,
+  //               children: [
+  //                 const Text(
+  //                   "نظام نقطة البيع",
+  //                   style: TextStyle(
+  //                     fontSize: 18,
+  //                     fontWeight: FontWeight.bold,
+  //                     color: Color(0xFF1A2B4D),
+  //                   ),
+  //                 ),
+  //                 Text(
+  //                   "إدارة ذكية للمبيعات والمخزون",
+  //                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+  //                 ),
+  //               ],
+  //             ),
+  //             const SizedBox(width: 16),
+  //             Container(
+  //               padding: const EdgeInsets.all(10),
+  //               decoration: BoxDecoration(
+  //                 borderRadius: BorderRadius.circular(10),
+  //                 gradient: const LinearGradient(
+  //                   colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
+  //                   begin: Alignment.topLeft,
+  //                   end: Alignment.bottomRight,
+  //                 ),
+  //               ),
+  //               child: const Icon(
+  //                 Icons.calculate_outlined,
+  //                 color: Colors.white,
+  //                 size: 24,
+  //               ),
+  //             ),
+  //           ],
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 
   // --- دالة مساعدة لبناء الـ Chips في الهيدر ---
-  Widget _buildStatusChip(String text, Color backgroundColor, Color textColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: textColor,
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
+  // Widget _buildStatusChip(String text, Color backgroundColor, Color textColor) {
+  //   return Container(
+  //     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  //     decoration: BoxDecoration(
+  //       color: backgroundColor,
+  //       borderRadius: BorderRadius.circular(20),
+  //     ),
+  //     child: Text(
+  //       text,
+  //       style: TextStyle(
+  //         color: textColor,
+  //         fontWeight: FontWeight.bold,
+  //         fontSize: 12,
+  //       ),
+  //     ),
+  //   );
+  // }
 
   // --- دالة شريط التنقل (لا تغيير هنا) ---
   Widget _buildCustomNavigationBar() {

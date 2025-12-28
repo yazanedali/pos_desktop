@@ -11,6 +11,11 @@ class DebtorInfo {
     this.walletBalance = 0.0,
   });
 
+  // الرصيد الصافي: (له - عليه)
+  // القيمة الموجبة تعني أن للزبون رصيد (له)
+  // القيمة السالبة تعني أن على الزبون دين (عليه)
+  double get netBalance => walletBalance - totalDebt;
+
   factory DebtorInfo.fromMap(Map<String, dynamic> map) {
     final totalDebtValue = (map['totalDebt'] as num? ?? 0).toDouble();
     final walletBalanceValue = (map['walletBalance'] as num? ?? 0).toDouble();

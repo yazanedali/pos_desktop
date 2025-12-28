@@ -9,6 +9,7 @@ class CartItem {
   double quantity;
   final String? barcode;
   final double stock;
+  final double purchasePrice; // <-- إضافة سعر الشراء للحماية
   String unitName;
   double unitQuantity;
   final List<ProductPackage> availablePackages;
@@ -21,6 +22,7 @@ class CartItem {
     required this.quantity,
     this.barcode,
     required this.stock,
+    this.purchasePrice = 0.0,
     required this.unitName,
     required this.unitQuantity,
     this.availablePackages = const [],

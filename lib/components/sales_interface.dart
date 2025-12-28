@@ -7,11 +7,13 @@ import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/models/product_package.dart';
 import 'package:pos_desktop/models/sales_invoice.dart';
 import 'package:pos_desktop/services/sales_invoice_service.dart';
+import '../services/cash_service.dart';
 import './sales/barcode_reader.dart';
 import './sales/products_grid.dart';
 import './sales/shopping_cart.dart';
 import '../widgets/top_alert.dart';
 import './sales/payment_dialog.dart';
+import 'package:flutter/services.dart';
 import '../../models/customer.dart';
 import '../../database/customer_queries.dart';
 import 'package:uuid/uuid.dart';
@@ -29,6 +31,7 @@ class _SalesInterfaceState extends State<SalesInterface>
   final CategoryQueries _categoryQueries = CategoryQueries();
   final CustomerQueries _customerQueries = CustomerQueries();
   final SalesInvoiceService _invoiceService = SalesInvoiceService();
+  final CashService _cashService = CashService();
 
   List<Product> _products = [];
   List<Category> _categories = [];
@@ -38,6 +41,7 @@ class _SalesInterfaceState extends State<SalesInterface>
   bool _isLoading = true;
   bool _isProcessingSale = false;
   final Uuid _uuid = const Uuid();
+  double? _customTotal;
 
   // Pagination & Filter Variables
   int _currentPage = 1;
@@ -85,6 +89,12 @@ class _SalesInterfaceState extends State<SalesInterface>
   }
 
   // --- دوال البحث والفلترة ---
+  final GlobalKey<ProductsTableState> _productsTableKey =
+      GlobalKey<ProductsTableState>();
+
+  void _focusSearch() {
+    _productsTableKey.currentState?.focusSearch();
+  }
 
   Future<void> _loadProducts({bool reset = true}) async {
     try {
@@ -241,12 +251,14 @@ class _SalesInterfaceState extends State<SalesInterface>
             price: product.price,
             quantity: 1.0,
             stock: product.stock,
+            purchasePrice: product.purchasePrice,
             unitName: 'حبة',
             unitQuantity: 1.0,
             availablePackages: availablePackages,
           ),
         );
       }
+      _customTotal = null; // إعادة تعيين الإجمالي المخصص عند إضافة منتج جديد
     });
   }
 
@@ -260,6 +272,7 @@ class _SalesInterfaceState extends State<SalesInterface>
         id: item.id,
         name: item.name,
         price: item.price,
+        purchasePrice: item.purchasePrice,
         stock: item.stock, // نعتمد على المخزون المسجل لحظة الإضافة
         // يمكن هنا إضافة استعلام قاعدة بيانات للحصول على المخزون المحدث إذا لزم الأمر
       );
@@ -313,6 +326,7 @@ class _SalesInterfaceState extends State<SalesInterface>
         item.price = newPackage.price;
         item.unitQuantity = newPackage.containedQuantity;
         item.quantity = newQuantity;
+        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تغيير الوحدة
       }
     });
   }
@@ -340,6 +354,7 @@ class _SalesInterfaceState extends State<SalesInterface>
           return;
         }
         item.quantity = newQuantity;
+        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تغيير الكمية
       }
     });
   }
@@ -347,6 +362,53 @@ class _SalesInterfaceState extends State<SalesInterface>
   void _removeFromCart(String cartItemId) {
     setState(() {
       _cartItems.removeWhere((item) => item.cartItemId == cartItemId);
+      _customTotal = null; // إعادة تعيين الإجمالي المخصص عند الحذف
+    });
+  }
+
+  void _updateCartItemPrice(String cartItemId, double newPrice) {
+    setState(() {
+      final itemIndex = _cartItems.indexWhere(
+        (item) => item.cartItemId == cartItemId,
+      );
+      if (itemIndex != -1) {
+        final item = _cartItems[itemIndex];
+        // حساب سعر الشراء للوحدة المختارة
+        final minAllowedPrice = item.purchasePrice * item.unitQuantity;
+
+        if (newPrice < minAllowedPrice) {
+          TopAlert.showError(
+            context: context,
+            message:
+                'لا يمكن خفض السعر عن سعر الشراء (${minAllowedPrice.toStringAsFixed(2)})',
+          );
+          return;
+        }
+
+        item.price = newPrice;
+        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تعديل سعر منتج
+      }
+    });
+  }
+
+  void _updateCustomTotal(double newTotal) {
+    setState(() {
+      // التحقق من أن الإجمالي الجديد لا يقل عن إجمالي سعر الشراء لكل العناصر
+      final totalPurchaseCost = _cartItems.fold(
+        0.0,
+        (sum, item) =>
+            sum + (item.purchasePrice * item.unitQuantity * item.quantity),
+      );
+
+      if (newTotal < totalPurchaseCost) {
+        TopAlert.showError(
+          context: context,
+          message:
+              'لا يمكن خفض الإجمالي عن إجمالي التكلفة (${totalPurchaseCost.toStringAsFixed(2)})',
+        );
+        return;
+      }
+      _customTotal = newTotal;
     });
   }
 
@@ -380,10 +442,12 @@ class _SalesInterfaceState extends State<SalesInterface>
       if (mounted) setState(() => _customers = updatedCustomers);
     } catch (_) {}
 
-    final total = _cartItems.fold(
+    final totalBeforeAdjustment = _cartItems.fold(
       0.0,
       (sum, item) => sum + (item.price * item.quantity),
     );
+
+    final total = _customTotal ?? totalBeforeAdjustment;
 
     final paymentResult = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -436,7 +500,16 @@ class _SalesInterfaceState extends State<SalesInterface>
         cashier: "Admin",
         customerId: customerId,
         paymentMethod: paymentMethod,
+        originalTotal: totalBeforeAdjustment,
       );
+
+      // تسجيل الدفع في الصندوق اليومي إذا كان هناك مبلغ مدفوع
+      if (paidAmount > 0) {
+        await _cashService.recordSaleIncome(
+          amount: paidAmount,
+          invoiceNumber: invoiceNumber,
+        );
+      }
 
       TopAlert.showSuccess(
         context: context,
@@ -456,54 +529,80 @@ class _SalesInterfaceState extends State<SalesInterface>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
     if (_isLoading) return const Center(child: CircularProgressIndicator());
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Column(
-              children: [
-                BarcodeReader(
-                  onProductScanned: _handleProductFromBarcode,
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF0F2F5),
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.f1): _focusSearch,
+          const SingleActivator(LogicalKeyboardKey.space): () {
+            // تنفيذ البيع بالمسافة فقط إذا لم يكن هناك تركيز على حقل نصي
+            if (FocusManager.instance.primaryFocus?.context?.widget
+                is! EditableText) {
+              if (_cartItems.isNotEmpty && !_isProcessingSale) {
+                _handleCheckout();
+              }
+            }
+          },
+        },
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 1. قسم المنتجات (صار أصغر - الثلث تقريباً)
+              Expanded(
+                flex: 4,
+                child: ProductsTable(
+                  key: _productsTableKey,
                   products: _products,
+                  categories: _categories,
+                  onProductAdded: _addToCart,
+                  hasMore: _hasMore,
+                  isLoadingMore: _isLoadingMore,
+                  onLoadMore: _loadMoreProducts,
+                  onSearch: (val) {
+                    setState(() => _searchTerm = val);
+                    _loadProducts(reset: true);
+                  },
+                  onCategorySelected: (val) {
+                    setState(() => _selectedCategoryId = val);
+                    _loadProducts(reset: true);
+                  },
+                  selectedCategoryId: _selectedCategoryId,
+                  searchTerm: _searchTerm,
+                  onClearFilters: () {
+                    setState(() {
+                      _searchTerm = "";
+                      _selectedCategoryId = null;
+                    });
+                    _loadProducts(reset: true);
+                  },
                 ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ProductsTable(
-                    products: _products,
-                    categories: _categories,
-                    onProductAdded: _addToCart,
-                    hasMore: _hasMore,
-                    isLoadingMore: _isLoadingMore,
-                    onLoadMore: _loadMoreProducts,
-                    onSearch: _onSearch,
-                    onCategorySelected: _onCategorySelected,
-                    selectedCategoryId: _selectedCategoryId,
-                    searchTerm: _searchTerm,
-                    onClearFilters: _clearFilters,
-                  ),
+              ),
+
+              const SizedBox(width: 16),
+
+              // 2. قسم السلة (صار أكبر - الثلثين تقريباً)
+              Expanded(
+                flex: 8, // نسبة 8 من 12 (حوالي 66%)
+                child: ShoppingCart(
+                  cartItems: _cartItems,
+                  products: _products,
+                  onQuantityUpdated: _updateCartItemQuantity,
+                  onPriceUpdated: _updateCartItemPrice,
+                  onUnitChanged: _updateCartItemUnit,
+                  onItemRemoved: _removeFromCart,
+                  onCheckout: _handleCheckout,
+                  onTotalUpdated: _updateCustomTotal,
+                  customTotal: _customTotal,
+                  isLoading: _isProcessingSale,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: ShoppingCart(
-              cartItems: _cartItems,
-              products: _products,
-              onQuantityUpdated: _updateCartItemQuantity,
-              onUnitChanged: _updateCartItemUnit,
-              onItemRemoved: _removeFromCart,
-              onCheckout: _handleCheckout,
-              isLoading: _isProcessingSale,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import 'package:pos_desktop/models/debtor_info.dart';
 import 'package:pos_desktop/models/supplier.dart';
 import 'package:pos_desktop/widgets/top_alert.dart';
 import 'package:pos_desktop/dialogs/supplier_dialog.dart';
+import 'package:pos_desktop/services/cash_service.dart';
 
 class CustomersAndSuppliersPage extends StatefulWidget {
   const CustomersAndSuppliersPage({super.key});
@@ -76,6 +77,7 @@ class CustomersTab extends StatefulWidget {
 
 class _CustomersTabState extends State<CustomersTab> {
   final CustomerQueries _customerQueries = CustomerQueries();
+  final CashService _cashService = CashService();
   late Future<List<DebtorInfo>> _debtorsFuture;
   final TextEditingController _searchController = TextEditingController();
   String _searchTerm = '';
@@ -207,6 +209,12 @@ class _CustomersTabState extends State<CustomersTab> {
                       amount,
                     );
                   }
+
+                  // تسجيل في الصندوق اليومي
+                  await _cashService.recordCustomerDebtPayment(
+                    amount: amount,
+                    customerName: debtor.customerName,
+                  );
 
                   if (mounted) {
                     Navigator.pop(context);
@@ -349,14 +357,18 @@ class _CustomersTabState extends State<CustomersTab> {
                     subtitle: Row(
                       children: [
                         Text(
-                          "عليه: ${debtor.totalDebt.toStringAsFixed(1)}",
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                        const SizedBox(width: 15),
-                        Text(
-                          "له (رصيد): ${debtor.walletBalance.toStringAsFixed(1)}",
-                          style: const TextStyle(
-                            color: Colors.green,
+                          debtor.netBalance < 0
+                              ? "عليه (دين): ${(debtor.netBalance.abs()).toStringAsFixed(1)}"
+                              : debtor.netBalance > 0
+                              ? "له (رصيد): ${debtor.netBalance.toStringAsFixed(1)}"
+                              : "متعادل (0.0)",
+                          style: TextStyle(
+                            color:
+                                debtor.netBalance < 0
+                                    ? Colors.red
+                                    : debtor.netBalance > 0
+                                    ? Colors.green
+                                    : Colors.grey,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -425,6 +437,7 @@ class SuppliersTab extends StatefulWidget {
 
 class _SuppliersTabState extends State<SuppliersTab> {
   final SupplierQueries _supplierQueries = SupplierQueries();
+  final CashService _cashService = CashService();
   late Future<List<Supplier>> _suppliersFuture;
   final TextEditingController _searchController = TextEditingController();
   String _searchTerm = '';
@@ -523,75 +536,116 @@ class _SuppliersTabState extends State<SuppliersTab> {
     }
 
     final amountController = TextEditingController();
+    String selectedBox = 'الصندوق الرئيسي';
+
     await showDialog(
       context: context,
       builder:
-          (context) => AlertDialog(
-            title: const Text("سداد للمورد"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("المورد: ${supplier.name}"),
-                Text(
-                  "المبلغ المستحق له: ${supplier.balance!.toStringAsFixed(2)} شيكل",
-                  style: const TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
+          (context) => StatefulBuilder(
+            builder:
+                (context, setDialogState) => AlertDialog(
+                  title: const Text("سداد للمورد"),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text("المورد: ${supplier.name}"),
+                      Text(
+                        "المبلغ المستحق له: ${supplier.balance!.toStringAsFixed(2)} شيكل",
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: amountController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: "المبلغ المدفوع",
+                          hintText: "أدخل المبلغ",
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedBox,
+                        decoration: const InputDecoration(
+                          labelText: "الدفع من صندوق",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(
+                            Icons.account_balance_wallet_outlined,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'الصندوق الرئيسي',
+                            child: Text("الصندوق الرئيسي"),
+                          ),
+                          DropdownMenuItem(
+                            value: 'الصندوق اليومي',
+                            child: Text("الصندوق اليومي"),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          setDialogState(() {
+                            selectedBox = val!;
+                          });
+                        },
+                      ),
+                    ],
                   ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("إلغاء"),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        final amount = double.tryParse(amountController.text);
+                        if (amount == null || amount <= 0) {
+                          TopAlert.showError(
+                            context: context,
+                            message: "يرجى إدخال مبلغ صحيح",
+                          );
+                          return;
+                        }
+
+                        if (amount > supplier.balance!) {
+                          TopAlert.showError(
+                            context: context,
+                            message: "المبلغ المدخل أكبر من المستحق",
+                          );
+                          return;
+                        }
+
+                        await _supplierQueries.paySupplier(
+                          supplier.id!,
+                          amount,
+                          "سداد يدوي",
+                        );
+
+                        // تسجيل الدفع في الصندوق المختار
+                        await _cashService.recordPurchasePayment(
+                          amount: amount,
+                          boxName: selectedBox,
+                          invoiceNumber:
+                              'MANUAL-${DateTime.now().millisecondsSinceEpoch}',
+                          supplierName: supplier.name,
+                        );
+
+                        if (mounted) {
+                          Navigator.pop(context);
+                          _loadData();
+                          TopAlert.showSuccess(
+                            context: context,
+                            message: "تم تسجيل السداد بنجاح",
+                          );
+                        }
+                      },
+                      child: const Text("تسجيل سداد"),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: amountController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "المبلغ المدفوع",
-                    hintText: "أدخل المبلغ",
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("إلغاء"),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  final amount = double.tryParse(amountController.text);
-                  if (amount == null || amount <= 0) {
-                    TopAlert.showError(
-                      context: context,
-                      message: "يرجى إدخال مبلغ صحيح",
-                    );
-                    return;
-                  }
-
-                  if (amount > supplier.balance!) {
-                    TopAlert.showError(
-                      context: context,
-                      message: "المبلغ المدخل أكبر من المستحق",
-                    );
-                    return;
-                  }
-
-                  await _supplierQueries.paySupplier(
-                    supplier.id!,
-                    amount,
-                    "سداد يدوي",
-                  );
-
-                  if (mounted) {
-                    Navigator.pop(context);
-                    _loadData();
-                    TopAlert.showSuccess(
-                      context: context,
-                      message: "تم تسجيل السداد بنجاح",
-                    );
-                  }
-                },
-                child: const Text("تسجيل سداد"),
-              ),
-            ],
           ),
     );
   }

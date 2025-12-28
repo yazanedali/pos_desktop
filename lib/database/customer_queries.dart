@@ -381,22 +381,101 @@ class CustomerQueries {
     );
   }
 
-  // تحديث رصيد المحفظة للعميل
-  Future<void> updateCustomerWallet(int customerId, double amount,
-      {bool isDeposit = true}) async {
+  // تحديث رصيد المحفظة للعميل مع سداد الدين تلقائياً إذا كان إيداع
+  Future<void> updateCustomerWallet(
+    int customerId,
+    double amount, {
+    bool isDeposit = true,
+  }) async {
     final db = await _dbHelper.database;
-    final customer = await getCustomerById(customerId);
-    if (customer == null) return;
 
-    double currentBalance = customer.walletBalance;
-    double newBalance =
-        isDeposit ? currentBalance + amount : currentBalance - amount;
+    await db.transaction((txn) async {
+      final List<Map<String, dynamic>> maps = await txn.query(
+        'customers',
+        where: 'id = ?',
+        whereArgs: [customerId],
+      );
+      if (maps.isEmpty) return;
 
-    await db.update(
-      'customers',
-      {'wallet_balance': newBalance},
-      where: 'id = ?',
-      whereArgs: [customerId],
-    );
+      double currentWallet = (maps.first['wallet_balance'] as num).toDouble();
+
+      if (isDeposit) {
+        // إذا كان إيداع، نتحقق أولاً إذا كان عليه ديون
+        final List<Map<String, dynamic>> debtItems = await txn.rawQuery(
+          '''
+          SELECT COALESCE(SUM(remaining_amount), 0) as totalDebt
+          FROM sales_invoices
+          WHERE customer_id = ? AND remaining_amount > 0
+        ''',
+          [customerId],
+        );
+
+        double totalDebt = (debtItems.first['totalDebt'] as num).toDouble();
+
+        if (totalDebt > 0) {
+          // يوجد دين، نسدده أولاً من مبلغ الإيداع
+          double amountToSettle = min(amount, totalDebt);
+
+          // دالة السداد المبرمجة مسبقاً (سنقوم بتمرير الـ txn لو كانت تدعم ذلك،
+          // ولكن بما أنها تستخدم _dbHelper.database داخلياً،
+          // فالأفضل مراجعة settleCustomerDebt لتقبل txn أو كتابة المنطق هنا)
+
+          // منطق السداد (منسوخ باختصار ليعمل داخل الـ txn)
+          List<Map<String, dynamic>> unpaidInvoices = await txn.query(
+            'sales_invoices',
+            where: 'customer_id = ? AND remaining_amount > 0',
+            whereArgs: [customerId],
+            orderBy: 'date ASC, time ASC',
+          );
+
+          double remainingPayment = amountToSettle;
+          for (var invoice in unpaidInvoices) {
+            if (remainingPayment <= 0) break;
+            double debtOnInv = (invoice['remaining_amount'] as num).toDouble();
+            double paidOnInv = (invoice['paid_amount'] as num).toDouble();
+            int invId = invoice['id'] as int;
+            double toPay = min(remainingPayment, debtOnInv);
+
+            await txn.update(
+              'sales_invoices',
+              {
+                'remaining_amount': debtOnInv - toPay,
+                'paid_amount': paidOnInv + toPay,
+                'payment_status': (debtOnInv - toPay) <= 0 ? 'مدفوع' : 'جزئي',
+              },
+              where: 'id = ?',
+              whereArgs: [invId],
+            );
+            remainingPayment -= toPay;
+          }
+
+          double surplus = amount - amountToSettle;
+          if (surplus > 0) {
+            await txn.update(
+              'customers',
+              {'wallet_balance': currentWallet + surplus},
+              where: 'id = ?',
+              whereArgs: [customerId],
+            );
+          }
+        } else {
+          // لا يوجد دين، أضف كامل المبلغ للمحفظة
+          await txn.update(
+            'customers',
+            {'wallet_balance': currentWallet + amount},
+            where: 'id = ?',
+            whereArgs: [customerId],
+          );
+        }
+      } else {
+        // سحب من المحفظة
+        await txn.update(
+          'customers',
+          {'wallet_balance': currentWallet - amount},
+          where: 'id = ?',
+          whereArgs: [customerId],
+        );
+      }
+    });
   }
 }

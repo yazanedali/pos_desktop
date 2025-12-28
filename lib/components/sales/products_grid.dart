@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/category.dart';
 import '../../models/product.dart';
+import 'package:pos_desktop/database/product_queries.dart';
+import '/widgets/top_alert.dart';
 
 class ProductsTable extends StatefulWidget {
   final List<Product> products;
@@ -32,19 +34,30 @@ class ProductsTable extends StatefulWidget {
   });
 
   @override
-  State<ProductsTable> createState() => _ProductsTableState();
+  State<ProductsTable> createState() => ProductsTableState();
 }
 
-class _ProductsTableState extends State<ProductsTable> {
+class ProductsTableState extends State<ProductsTable> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounce;
+
+  // اللون البنفسجي الأساسي من الهيدر
+  final Color _brandColor = const Color(0xFF4A80F0);
 
   @override
   void initState() {
     super.initState();
     _searchController.text = widget.searchTerm;
     _setupScrollListener();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).requestFocus(_searchFocusNode);
+    });
+  }
+
+  void focusSearch() {
+    FocusScope.of(context).requestFocus(_searchFocusNode);
   }
 
   @override
@@ -60,11 +73,41 @@ class _ProductsTableState extends State<ProductsTable> {
     }
   }
 
-  void _onSearchChanged(String query) {
+  void _onSearchChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
-      widget.onSearch?.call(query);
+      widget.onSearch?.call(value);
     });
+  }
+
+  void _handleSubmitted(String value) async {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    if (value.trim().isEmpty) return;
+
+    final trimmedValue = value.trim();
+
+    // محاولة البحث كباركود أولاً عند ضغط Enter
+    final productByBarcode = await ProductQueries().getProductByBarcode(
+      trimmedValue,
+    );
+
+    if (productByBarcode != null) {
+      if (productByBarcode.id != null) {
+        productByBarcode.packages = await ProductQueries()
+            .getPackagesForProduct(productByBarcode.id!);
+      }
+      widget.onProductAdded(productByBarcode);
+
+      // تفريغ الحقل بشكل صريح ومباشر
+      _searchController.text = "";
+      _searchController.clear();
+
+      widget.onClearFilters?.call();
+      FocusScope.of(context).requestFocus(_searchFocusNode);
+    } else {
+      // إذا لم يكن باركود، نكتفي بالبحث العادي
+      widget.onSearch?.call(trimmedValue);
+    }
   }
 
   void _setupScrollListener() {
@@ -77,18 +120,7 @@ class _ProductsTableState extends State<ProductsTable> {
   }
 
   @override
-  void dispose() {
-    _debounce?.cancel();
-    _searchController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final bool hasFilters =
-        _searchController.text.isNotEmpty || widget.selectedCategoryId != null;
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -99,322 +131,297 @@ class _ProductsTableState extends State<ProductsTable> {
       ),
       child: Column(
         children: [
-          // Header Section
+          // 1. الهيدر: بحث + تصنيفات
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12),
-              ),
-              border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+              border: Border(bottom: BorderSide(color: Colors.grey[100]!)),
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Title and Count
-                Row(
-                  children: [
-                    const Spacer(),
-                    if (hasFilters)
-                      TextButton.icon(
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(1),
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    onChanged: _onSearchChanged,
+                    onSubmitted: _handleSubmitted,
+                    style: const TextStyle(fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: "بحث...",
+                      prefixIcon: Icon(Icons.search, color: _brandColor),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.qr_code, size: 20),
+                        focusNode: FocusNode(canRequestFocus: false),
                         onPressed: () {
                           _searchController.clear();
                           widget.onClearFilters?.call();
+                          FocusScope.of(context).requestFocus(_searchFocusNode);
                         },
-                        icon: const Icon(Icons.filter_list_off, size: 18),
-                        label: const Text('إلغاء الفلترة'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.redAccent,
+                      ),
+                      filled: true,
+                      fillColor: const Color(
+                        0xFFF7FAFC,
+                      ), // خلفية رمادية فاتحة جداً
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(
+                          color: _brandColor.withOpacity(0.1),
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Search Bar
-                TextField(
-                  controller: _searchController,
-                  onChanged: _onSearchChanged,
-                  decoration: InputDecoration(
-                    hintText: "بحث باسم المنتج أو الباركود...",
-                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                    suffixIcon:
-                        _searchController.text.isNotEmpty
-                            ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                _searchController.clear();
-                                widget.onSearch?.call("");
-                              },
-                            )
-                            : null,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    isDense: true,
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Colors.blue),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(
+                          color: _brandColor.withOpacity(0.1),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: _brandColor, width: 1.5),
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 12,
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-
-                // Categories List (Improved UI)
-                SizedBox(
-                  height: 40,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: widget.categories.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return _buildCategoryChip(
-                          label: 'الكل',
-                          isSelected: widget.selectedCategoryId == null,
-                          onTap: () => widget.onCategorySelected?.call(null),
-                        );
-                      }
-                      final category = widget.categories[index - 1];
-                      return _buildCategoryChip(
-                        label: category.name,
-                        color: category.color,
-                        isSelected: widget.selectedCategoryId == category.id,
-                        onTap:
-                            () => widget.onCategorySelected?.call(category.id),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Products List
-          Expanded(
-            child:
-                widget.products.isEmpty
-                    ? _buildEmptyState(hasFilters)
-                    : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 80),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount:
-                          widget.products.length + (widget.hasMore ? 1 : 0),
+                const SizedBox(height: 8),
+                Focus(
+                  descendantsAreFocusable: false,
+                  skipTraversal: true,
+                  child: SizedBox(
+                    height: 30,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.categories.length + 1,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
                       itemBuilder: (context, index) {
-                        if (index == widget.products.length) {
-                          return const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Center(
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
+                        if (index == 0)
+                          return _buildFilterChip(
+                            "الكل",
+                            null,
+                            widget.selectedCategoryId == null,
                           );
-                        }
-                        return _buildProductRow(widget.products[index], index);
+                        final cat = widget.categories[index - 1];
+                        return _buildFilterChip(
+                          cat.name,
+                          cat.id,
+                          widget.selectedCategoryId == cat.id,
+                        );
                       },
                     ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCategoryChip({
-    required String label,
-    String? color,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    final themeColor =
-        color != null ? _hexToColor(color) : Theme.of(context).primaryColor;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? themeColor : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? themeColor : Colors.grey[300]!,
-          ),
-          boxShadow:
-              isSelected
-                  ? [
-                    BoxShadow(
-                      color: themeColor.withOpacity(0.3),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                  : null,
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : Colors.grey[700],
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              fontSize: 13,
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-      ),
-    );
-  }
 
-  Widget _buildProductRow(Product product, int index) {
-    // استخدام try-catch أو orElse لتجنب خطأ Bad State
-    Category category;
-    try {
-      category = widget.categories.firstWhere(
-        (c) => c.id == product.categoryId,
-        orElse: () => Category(id: 0, name: 'غير مصنف', color: '#9E9E9E'),
-      );
-    } catch (_) {
-      category = Category(id: 0, name: 'غير مصنف', color: '#9E9E9E');
-    }
-
-    final categoryColor = _hexToColor(category.color);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: ListTile(
-        onTap: () => widget.onProductAdded(product),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        leading: CircleAvatar(
-          backgroundColor: categoryColor.withOpacity(0.1),
-          child: Text(
-            product.name.isNotEmpty ? product.name[0].toUpperCase() : '?',
-            style: TextStyle(color: categoryColor, fontWeight: FontWeight.bold),
-          ),
-        ),
-        title: Text(
-          product.name,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                if (product.barcode != null && product.barcode!.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+          // 2. عناوين الجدول (Header Row)
+          Focus(
+            descendantsAreFocusable: false,
+            skipTraversal: true,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.grey[50],
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
                     child: Text(
-                      product.barcode!,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                      "المنتج",
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                const SizedBox(width: 8),
-                Text(
-                  category.name,
-                  style: TextStyle(fontSize: 11, color: categoryColor),
-                ),
-              ],
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${product.price.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Colors.green,
+                  Expanded(
+                    child: Text(
+                      "السعر",
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                ),
-                Text(
-                  'المخزون: ${product.stock.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: product.stock <= 0 ? Colors.red : Colors.grey[600],
-                  ),
-                ),
-              ],
+                  const SizedBox(width: 40), // مساحة للزر
+                ],
+              ),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.add_circle, color: Colors.blue),
-              onPressed: () => widget.onProductAdded(product),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+          ),
+          const Divider(height: 1),
 
-  Widget _buildEmptyState(bool hasFilters) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            hasFilters ? Icons.search_off : Icons.layers_clear,
-            size: 64,
-            color: Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            hasFilters
-                ? "لا توجد نتائج تطابق بحثك"
-                : "لا توجد منتجات في هذه الفئة",
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-          ),
-          if (hasFilters)
-            TextButton(
-              onPressed: () {
-                _searchController.clear();
-                widget.onClearFilters?.call();
-              },
-              child: const Text('عرض كل المنتجات'),
+          // 3. قائمة المنتجات (Table Rows)
+          Expanded(
+            child: Focus(
+              descendantsAreFocusable: false,
+              skipTraversal: true,
+              child:
+                  widget.products.isEmpty
+                      ? Center(
+                        child: Text(
+                          "لا توجد منتجات",
+                          style: TextStyle(color: Colors.grey[400]),
+                        ),
+                      )
+                      : ListView.separated(
+                        controller: _scrollController,
+                        itemCount:
+                            widget.products.length + (widget.hasMore ? 1 : 0),
+                        separatorBuilder:
+                            (context, index) => const Divider(
+                              height: 1,
+                              indent: 12,
+                              endIndent: 12,
+                            ),
+                        itemBuilder: (context, index) {
+                          if (index == widget.products.length)
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            );
+                          return _buildProductRow(widget.products[index]);
+                        },
+                      ),
             ),
+          ),
         ],
       ),
     );
   }
 
-  Color _hexToColor(String hex) {
-    try {
-      hex = hex.replaceAll("#", "");
-      if (hex.length == 6) hex = "FF$hex";
-      return Color(int.parse(hex, radix: 16));
-    } catch (_) {
-      return Colors.grey; // لون احتياطي في حال كان الكود اللوني خطأ
-    }
+  Widget _buildFilterChip(String label, int? id, bool isSelected) {
+    return InkWell(
+      onTap: () => widget.onCategorySelected?.call(id),
+      canRequestFocus: false,
+      borderRadius: BorderRadius.circular(
+        20,
+      ), // تخطي التصنيفات عند التنقل بالـ TAB
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          // استخدام التدرج في حالة الاختيار
+          gradient:
+              isSelected
+                  ? const LinearGradient(
+                    colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
+                  )
+                  : null,
+          color: isSelected ? null : Colors.white,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? Colors.transparent : Colors.grey[300]!,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.grey[700],
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProductRow(Product product) {
+    bool hasStock = product.stock > 0;
+    return InkWell(
+      onTap: () => widget.onProductAdded(product),
+      canRequestFocus: false, // تخطي سطر المنتج عند التنقل بالـ TAB
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            // أيقونة المنتج
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(
+                child: Text(
+                  product.name.isNotEmpty ? product.name[0] : '?',
+                  style: TextStyle(
+                    color: _brandColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            // اسم المنتج والمخزون
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    "مخزون: ${product.stock.toStringAsFixed(0)}",
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: hasStock ? Colors.grey : Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // السعر
+            Expanded(
+              child: Text(
+                "${product.price.toStringAsFixed(1)} ₪",
+                style: const TextStyle(
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            // زر الإضافة
+            IconButton(
+              icon: Icon(Icons.add_circle, color: _brandColor),
+              onPressed: () => widget.onProductAdded(product),
+              focusNode: FocusNode(
+                canRequestFocus: false,
+              ), // تخطي زر الإضافة عند التنقل بالـ TAB
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
+    _scrollController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
   }
 }

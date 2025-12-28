@@ -11,7 +11,7 @@ import './product_dialog.dart'; // ← استيراد نافذة المنتج
 
 class PurchaseInvoiceDialog extends StatefulWidget {
   final List<Category> categories;
-  final Function(PurchaseInvoice, String) onSave; // ← تغيير هنا
+  final Function(PurchaseInvoice, String, String) onSave; // ← Added boxName
   final Function() onCancel;
   final PurchaseInvoice? invoiceToEdit;
   final Function()? onProductAdded;
@@ -44,6 +44,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
   Supplier? _selectedSupplier;
   String _paymentStatus = 'مدفوع'; // مدفوع، جزئي، غير مدفوع
   double _paidAmount = 0.0;
+  String _selectedBox = 'الصندوق الرئيسي';
   final TextEditingController _paidAmountController = TextEditingController();
 
   final List<TextEditingController> _productNameControllers = [];
@@ -362,7 +363,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
     );
 
     // ← أضف معلمة الخيار هنا
-    widget.onSave(invoice, _purchasePriceUpdateMethod);
+    widget.onSave(invoice, _purchasePriceUpdateMethod, _selectedBox);
   }
 
   Widget _buildProductsList() {
@@ -869,7 +870,43 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                       ),
                     ),
                   ],
-                  const SizedBox(width: 12),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              Row(
+                children: [
+                  if (_paymentStatus != 'غير مدفوع') ...[
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedBox,
+                        decoration: const InputDecoration(
+                          labelText: "الدفع من صندوق",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(
+                            Icons.account_balance_wallet_outlined,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'الصندوق الرئيسي',
+                            child: Text("الصندوق الرئيسي"),
+                          ),
+                          DropdownMenuItem(
+                            value: 'الصندوق اليومي',
+                            child: Text("الصندوق اليومي"),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedBox = val!;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     flex: 2,
                     child: DropdownButtonFormField<String>(

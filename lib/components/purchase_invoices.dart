@@ -5,6 +5,7 @@ import 'purchase_invoice_dialog.dart';
 import 'purchase_invoice_details_dialog.dart';
 import '../database/purchase_queries.dart';
 import '../database/category_queries.dart';
+import '../services/cash_service.dart';
 import '../widgets/top_alert.dart';
 
 class PurchaseInvoices extends StatefulWidget {
@@ -17,6 +18,7 @@ class PurchaseInvoices extends StatefulWidget {
 class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   final PurchaseQueries _purchaseQueries = PurchaseQueries();
   final CategoryQueries _categoryQueries = CategoryQueries();
+  final CashService _cashService = CashService();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -165,7 +167,11 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
   }
 
-  void _addInvoice(PurchaseInvoice invoice, String updateMethod) async {
+  void _addInvoice(
+    PurchaseInvoice invoice,
+    String updateMethod,
+    String boxName,
+  ) async {
     // ← تحديث
     try {
       await _purchaseQueries.insertPurchaseInvoice(
@@ -176,13 +182,28 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
         context: context,
         message: "تم إضافة فاتورة الشراء ${invoice.invoiceNumber} بنجاح",
       );
+
+      // تسجيل الدفع في الصندوق المختار إذا كان هناك مبلغ مدفوع
+      if (invoice.paidAmount > 0) {
+        await _cashService.recordPurchasePayment(
+          amount: invoice.paidAmount,
+          boxName: boxName,
+          invoiceNumber: invoice.invoiceNumber,
+          supplierName: invoice.supplier,
+        );
+      }
+
       _refreshData();
     } catch (e) {
       TopAlert.showError(context: context, message: "حدث خطأ: ${e.toString()}");
     }
   }
 
-  void _updateInvoice(PurchaseInvoice invoice, String updateMethod) async {
+  void _updateInvoice(
+    PurchaseInvoice invoice,
+    String updateMethod,
+    String boxName,
+  ) async {
     // ← تحديث
     try {
       await _purchaseQueries.updatePurchaseInvoice(
@@ -209,9 +230,9 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
           (context) => PurchaseInvoiceDialog(
             categories: _categories,
             invoiceToEdit: invoice,
-            onSave: (updatedInvoice, updateMethod) {
+            onSave: (updatedInvoice, updateMethod, boxName) {
               // ← تحديث
-              _updateInvoice(updatedInvoice, updateMethod);
+              _updateInvoice(updatedInvoice, updateMethod, boxName);
               Navigator.of(context).pop();
             },
             onCancel: () => Navigator.of(context).pop(),
@@ -250,9 +271,9 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
       builder:
           (context) => PurchaseInvoiceDialog(
             categories: _categories,
-            onSave: (invoice, updateMethod) {
+            onSave: (invoice, updateMethod, boxName) {
               // ← تحديث هنا
-              _addInvoice(invoice, updateMethod);
+              _addInvoice(invoice, updateMethod, boxName);
               Navigator.of(context).pop();
             },
             onCancel: () => Navigator.of(context).pop(),

@@ -3,25 +3,30 @@ import 'package:flutter/services.dart';
 import 'package:pos_desktop/models/product.dart';
 import 'package:pos_desktop/models/product_package.dart';
 import '../../models/cart_item.dart';
-import '/widgets/top_alert.dart';
 
 class ShoppingCart extends StatefulWidget {
   final List<CartItem> cartItems;
   final List<Product> products;
   final Function(String, double) onQuantityUpdated;
+  final Function(String, double) onPriceUpdated;
   final Function(String, ProductPackage, bool) onUnitChanged;
   final Function(String) onItemRemoved;
   final Function() onCheckout;
+  final Function(double) onTotalUpdated;
   final bool isLoading;
+  final double? customTotal;
 
   const ShoppingCart({
     super.key,
     required this.cartItems,
     required this.products,
     required this.onQuantityUpdated,
+    required this.onPriceUpdated,
     required this.onUnitChanged,
     required this.onItemRemoved,
     required this.onCheckout,
+    required this.onTotalUpdated,
+    this.customTotal,
     this.isLoading = false,
   });
 
@@ -30,26 +35,25 @@ class ShoppingCart extends StatefulWidget {
 }
 
 class _ShoppingCartState extends State<ShoppingCart> {
-  // --- التعديل الأساسي هنا ---
-  // هذه الدالة الآن آمنة ولن تسبب Crash إذا كان المنتج غير موجود في القائمة المعروضة
+  // الألوان الأساسية
+  final Color _primaryBlue = const Color(0xFF4A80F0);
+  final Color _lightBlueBg = const Color(0xFFF0F5FF);
+
   Product _getProductForCartItem(CartItem item) {
-    return widget.products.firstWhere(
-      (p) => p.id == item.id,
-      orElse: () {
-        // في حال لم يتم العثور على المنتج (بسبب الفلترة)، ننشئ منتجاً من بيانات السلة
-        return Product(
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          stock: item.stock,
-          // نسترجع الحزم من بيانات السلة، مع استبعاد الوحدة الأساسية لأن الـ UI قد يضيفها
-          packages:
-              item.availablePackages
-                  .where((p) => p.containedQuantity != 1.0)
-                  .toList(),
-        );
-      },
-    );
+    try {
+      return widget.products.firstWhere((p) => p.id == item.id);
+    } catch (e) {
+      return Product(
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        stock: item.stock,
+        packages:
+            item.availablePackages
+                .where((p) => p.containedQuantity != 1.0)
+                .toList(),
+      );
+    }
   }
 
   double _calculateTotal() {
@@ -61,98 +65,200 @@ class _ShoppingCartState extends State<ShoppingCart> {
 
   @override
   Widget build(BuildContext context) {
+    final totalAmount = widget.customTotal ?? _calculateTotal();
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.shade100),
+        border: Border.all(color: _primaryBlue.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: _primaryBlue.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          _buildHeader(),
+          // 1. ترويسة السلة
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 16,
+            ), // تقليل الارتفاع قليلاً هنا أيضاً
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.shopping_bag_outlined,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      "سلة المشتريات (${widget.cartItems.length})",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+                if (widget.cartItems.isNotEmpty)
+                  Focus(
+                    descendantsAreFocusable: false,
+                    skipTraversal: true,
+                    child: InkWell(
+                      onTap: () {}, // إضافة كود التفريغ هنا
+                      canRequestFocus: false,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.delete_sweep,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              "تفريغ",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // 2. عناوين الأعمدة
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 8,
+            ), // تقليل الارتفاع
+            decoration: BoxDecoration(
+              color: _lightBlueBg,
+              border: Border(
+                bottom: BorderSide(color: _primaryBlue.withOpacity(0.1)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Text("تفاصيل المنتج", style: _headerStyle()),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text("السعر / الوحدة", style: _headerStyle()),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "الكمية",
+                    style: _headerStyle(),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "الإجمالي",
+                    style: _headerStyle(),
+                    textAlign: TextAlign.end,
+                  ),
+                ),
+                const SizedBox(width: 30),
+              ],
+            ),
+          ),
+
+          // 3. القائمة
           Expanded(
             child:
                 widget.cartItems.isEmpty
-                    ? _buildEmptyCart()
-                    : _buildCartItems(),
+                    ? _buildEmptyState()
+                    : ListView.separated(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 4,
+                      ), // تقليل الحاشية العلوية والسفلية للقائمة
+                      itemCount: widget.cartItems.length,
+                      separatorBuilder:
+                          (context, index) => Divider(
+                            height: 1,
+                            color: _primaryBlue.withOpacity(0.05),
+                            indent: 20,
+                            endIndent: 20,
+                          ),
+                      itemBuilder: (context, index) {
+                        final item =
+                            widget.cartItems[widget.cartItems.length -
+                                1 -
+                                index];
+                        return _buildCartRow(item, Key(item.cartItemId), index);
+                      },
+                    ),
           ),
-          if (widget.cartItems.isNotEmpty) _buildCartFooter(context),
+
+          // 4. الفوتر
+          if (widget.cartItems.isNotEmpty) _buildFooter(context, totalAmount),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(12),
-          topRight: Radius.circular(12),
+  TextStyle _headerStyle() =>
+      TextStyle(color: _primaryBlue, fontSize: 12, fontWeight: FontWeight.bold);
+
+  Widget _buildEmptyState() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.shopping_cart_outlined,
+          size: 80,
+          color: _primaryBlue.withOpacity(0.2),
         ),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.shopping_cart, color: Colors.blue[800]),
-          const SizedBox(width: 8),
-          const Text(
-            "سلة المشتريات",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.blue,
-            ),
-          ),
-          const Spacer(),
-          if (widget.isLoading)
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-        ],
-      ),
+        const SizedBox(height: 16),
+        Text(
+          "السلة فارغة",
+          style: TextStyle(color: _primaryBlue.withOpacity(0.4), fontSize: 16),
+        ),
+      ],
     );
   }
 
-  Widget _buildEmptyCart() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.shopping_cart_outlined, size: 48, color: Colors.grey),
-          SizedBox(height: 16),
-          Text(
-            "السلة فارغة",
-            style: TextStyle(fontSize: 16, color: Colors.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCartItems() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: widget.cartItems.length,
-      itemBuilder: (context, index) {
-        // نمرر الـ key لضمان تحديث الـ widgets بشكل صحيح عند الحذف
-        return _buildCartItem(
-          widget.cartItems[index],
-          Key(widget.cartItems[index].cartItemId),
-        );
-      },
-    );
-  }
-
-  Widget _buildCartItem(CartItem item, Key key) {
-    // نستخدم الدالة الآمنة التي أنشأناها
+  Widget _buildCartRow(CartItem item, Key key, int index) {
     final product = _getProductForCartItem(item);
-
-    // نستخدم الحزم الموجودة في عنصر السلة مباشرة لضمان الاتساق
-    // إذا كانت فارغة (وهذا نادر)، نستخدم الطريقة القديمة كاحتياط
-    final List<ProductPackage> availablePackages =
+    final availablePackages =
         item.availablePackages.isNotEmpty
             ? item.availablePackages
             : [
@@ -164,266 +270,354 @@ class _ShoppingCartState extends State<ShoppingCart> {
               ...product.packages,
             ];
 
-    final quantityController = TextEditingController(
-      text: item.quantity.toStringAsFixed(item.quantity % 1 == 0 ? 0 : 3),
-    );
-
-    // تحسين وضع المؤشر في نهاية النص
-    quantityController.selection = TextSelection.fromPosition(
-      TextPosition(offset: quantityController.text.length),
-    );
-
-    return Card(
-      key: key,
-      elevation: 1,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    item.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Text(
-                  "${(item.price * item.quantity).toStringAsFixed(2)} شيكل",
-                  style: const TextStyle(
-                    color: Colors.blue,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                // القائمة المنسدلة للوحدات
-                Expanded(
-                  flex: 3,
-                  child: DropdownButtonFormField<String>(
-                    value: item.unitName,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      isDense: true,
-                    ),
-                    items:
-                        availablePackages.map((package) {
-                          // التحقق من المخزون بناءً على المنتج (سواء كان الأصلي أو المؤقت)
-                          final bool isEnabled =
-                              product.stock >= package.containedQuantity;
-                          return DropdownMenuItem(
-                            value: package.name,
-                            enabled:
-                                isEnabled, // تعطيل الوحدة إذا لم يكن هناك مخزون كافٍ
-                            child: Text(
-                              package.name,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isEnabled ? Colors.black87 : Colors.grey,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
-                    onChanged: (value) {
-                      if (value != null && value != item.unitName) {
-                        try {
-                          final selectedPackage = availablePackages.firstWhere(
-                            (p) => p.name == value,
-                          );
-                          widget.onUnitChanged(
-                            item.cartItemId,
-                            selectedPackage,
-                            false,
-                          );
-                          // إعادة تعيين الكمية لـ 1 عند تغيير الوحدة لتجنب مشاكل المخزون
-                          // يمكن إزالتها إذا كانت الدالة onUnitChanged تعالج ذلك
-                        } catch (e) {
-                          // تجاهل الخطأ في حال حدوث مشكلة غير متوقعة
-                        }
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // التحكم بالكمية
-                Expanded(
-                  flex: 3,
-                  child: Row(
-                    children: [
-                      _buildQuantityButton(
-                        Icons.remove,
-                        () => widget.onQuantityUpdated(
-                          item.cartItemId,
-                          item.quantity - 1,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: SizedBox(
-                          height: 34,
-                          child: TextFormField(
-                            controller: quantityController,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d*\.?\d*'),
-                              ),
-                            ],
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            onFieldSubmitted: (value) {
-                              final newQuantity =
-                                  double.tryParse(value) ?? item.quantity;
-                              widget.onQuantityUpdated(
-                                item.cartItemId,
-                                newQuantity,
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      _buildQuantityButton(
-                        Icons.add,
-                        () => widget.onQuantityUpdated(
-                          item.cartItemId,
-                          item.quantity + 1,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      _buildQuantityButton(
-                        Icons.delete,
-                        () => widget.onItemRemoved(item.cartItemId),
-                        color: Colors.red,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuantityButton(
-    IconData icon,
-    VoidCallback onPressed, {
-    Color color = Colors.black87,
-  }) {
-    return SizedBox(
-      width: 34,
-      height: 34,
-      child: IconButton(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 16, color: color),
-        padding: EdgeInsets.zero,
-        style: IconButton.styleFrom(
-          backgroundColor:
-              color == Colors.red ? Colors.red.shade50 : Colors.grey[200],
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCartFooter(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
-      ),
-      child: Column(
+      key: key,
+      // ✅ تم تقليل الـ Padding العمودي من 14 إلى 8 لتقليل ارتفاع السطر
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      color: Colors.white,
+      child: Row(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "الإجمالي:",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                "${_calculateTotal().toStringAsFixed(2)} شيكل",
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
+          // 1. الاسم
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  item.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Color(0xFF2D3748),
+                  ),
+                  maxLines: 1, // جعلته سطر واحد لتوفير المساحة
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed:
-                      widget.isLoading
-                          ? null
-                          : () => TopAlert.showSuccess(
-                            context: context,
-                            message: 'تم إرسال الفاتورة للطباعة',
+
+          const SizedBox(width: 8),
+
+          // 2. السعر والوحدة
+          Expanded(
+            flex: 3,
+            child: Focus(
+              descendantsAreFocusable: false,
+              skipTraversal: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // قائمة الوحدات (ارتفاع أقل)
+                  Container(
+                    height: 26, // ✅ تم التقليل من 30 إلى 26
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: _lightBlueBg,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: item.unitName,
+                        isExpanded: true,
+                        focusNode: FocusNode(canRequestFocus: false),
+                        icon: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 14,
+                          color: _primaryBlue,
+                        ),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _primaryBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        items:
+                            availablePackages
+                                .map(
+                                  (p) => DropdownMenuItem(
+                                    value: p.name,
+                                    enabled:
+                                        product.stock >= p.containedQuantity,
+                                    child: Text(p.name),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (val) {
+                          if (val != null && val != item.unitName) {
+                            widget.onUnitChanged(
+                              item.cartItemId,
+                              availablePackages.firstWhere(
+                                (p) => p.name == val,
+                              ),
+                              false,
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 2), // مسافة صغيرة جداً
+                  // حقل السعر
+                  SizedBox(
+                    width: 80,
+                    height: 20, // ✅ ارتفاع صغير للسعر
+                    child: TextFormField(
+                      initialValue: item.price.toStringAsFixed(2),
+                      focusNode: FocusNode(canRequestFocus: false),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        suffixText: " ₪",
+                        suffixStyle: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      onFieldSubmitted:
+                          (v) => widget.onPriceUpdated(
+                            item.cartItemId,
+                            double.tryParse(v) ?? item.price,
                           ),
-                  icon: const Icon(Icons.print, size: 18),
-                  label: const Text("طباعة"),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: Colors.blue.shade200),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          // 3. الكمية
+          Expanded(
+            flex: 3,
+            child: Container(
+              height: 30,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  _qtyBtn(
+                    Icons.remove,
+                    () => widget.onQuantityUpdated(
+                      item.cartItemId,
+                      item.quantity - 1,
+                    ),
+                  ),
+                  Expanded(
+                    child: FocusTraversalOrder(
+                      order: NumericFocusOrder(2.0 + index),
+                      child: TextFormField(
+                        initialValue:
+                            item.quantity % 1 == 0
+                                ? item.quantity.toStringAsFixed(0)
+                                : item.quantity.toString(),
+                        textAlign: TextAlign.center,
+                        // Removed FocusNode(skipTraversal: false, canRequestFocus: true)
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onFieldSubmitted: (v) {
+                          final val = double.tryParse(v);
+                          if (val != null) {
+                            widget.onQuantityUpdated(item.cartItemId, val);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  _qtyBtn(
+                    Icons.add,
+                    () => widget.onQuantityUpdated(
+                      item.cartItemId,
+                      item.quantity + 1,
+                    ),
+                    isPlus: true,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          // 4. المجموع
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  (item.price * item.quantity).toStringAsFixed(2),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
                   ),
                 ),
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 10),
+
+          // زر الحذف
+          Focus(
+            descendantsAreFocusable: false,
+            skipTraversal: true,
+            child: InkWell(
+              onTap: () => widget.onItemRemoved(item.cartItemId),
+              canRequestFocus: false,
+              borderRadius: BorderRadius.circular(50),
+              child: Container(
+                padding: const EdgeInsets.all(4), // تصغير مساحة اللمس قليلاً
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.05),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 14, color: Colors.red),
               ),
-              const SizedBox(width: 12),
-              Expanded(
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _qtyBtn(IconData icon, VoidCallback onTap, {bool isPlus = false}) {
+    return InkWell(
+      onTap: onTap,
+      canRequestFocus: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+        child: Icon(
+          icon,
+          size: 14,
+          color: isPlus ? _primaryBlue : Colors.black54,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFooter(BuildContext context, double total) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 24,
+        vertical: 16,
+      ), // تقليل البادينغ العمودي للفوتر
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: _primaryBlue.withOpacity(0.1))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "الإجمالي النهائي",
+                  style: TextStyle(fontSize: 11, color: _primaryBlue),
+                ),
+                SizedBox(
+                  width: 200,
+                  child: Focus(
+                    descendantsAreFocusable: false,
+                    skipTraversal: true,
+                    child: TextFormField(
+                      key: ValueKey(total),
+                      initialValue: total.toStringAsFixed(2),
+                      focusNode: FocusNode(canRequestFocus: false),
+                      style: const TextStyle(
+                        fontSize: 24, // تصغير الخط قليلاً
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF4A80F0),
+                        letterSpacing: 1,
+                      ),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        suffixText: " ₪",
+                        suffixStyle: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onFieldSubmitted: (value) {
+                        final newTotal = double.tryParse(value);
+                        if (newTotal != null) {
+                          widget.onTotalUpdated(newTotal);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            flex: 3,
+            child: FocusTraversalOrder(
+              order: const NumericFocusOrder(1000),
+              child: SizedBox(
+                height: 48, // تقليل ارتفاع زر الدفع قليلاً
                 child: ElevatedButton(
                   onPressed: widget.isLoading ? null : widget.onCheckout,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: const Color(0xFF10B981),
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shadowColor: const Color(0xFF10B981).withOpacity(0.4),
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   child:
                       widget.isLoading
-                          ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.payment, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                "دفع (Space)",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
-                          )
-                          : const Text("إتمام البيع"),
+                            ],
+                          ),
                 ),
               ),
-            ],
+            ),
           ),
         ],
       ),

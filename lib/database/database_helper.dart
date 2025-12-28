@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 7, // غير من 6 إلى 7
+      version: 8, // غير من 7 إلى 8 لتعريف الصناديق
       onCreate: _createDatabase,
       onUpgrade: (db, oldVersion, newVersion) async {
         // Migration path: v2 -> v3 add product_barcodes table
@@ -49,6 +49,46 @@ class DatabaseHelper {
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_product_barcodes_barcode ON product_barcodes(barcode)',
           );
+        }
+
+        // Migration path: v7 -> v8 (Add Cash Boxes)
+        if (oldVersion < 8) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS cash_boxes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT UNIQUE NOT NULL,
+              balance REAL DEFAULT 0,
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          ''');
+
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS cash_movements (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              box_id INTEGER NOT NULL,
+              amount REAL NOT NULL,
+              type TEXT NOT NULL,
+              direction TEXT NOT NULL,
+              notes TEXT,
+              date TEXT NOT NULL,
+              time TEXT NOT NULL,
+              related_id TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (box_id) REFERENCES cash_boxes (id)
+            )
+          ''');
+
+          // إدخال الصناديق الافتراضية إذا لم تكن موجودة
+          await db.insert('cash_boxes', {
+            'name': 'الصندوق اليومي',
+            'balance': 0.0,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+          await db.insert('cash_boxes', {
+            'name': 'الصندوق الرئيسي',
+            'balance': 0.0,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
         }
 
         // Migration path: v3 -> v4 Add Suppliers and Wallet Balance
@@ -414,7 +454,6 @@ class DatabaseHelper {
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
     ''');
-
     // جدول حركات المخزون
     await db.execute('''
       CREATE TABLE IF NOT EXISTS inventory_transactions (
@@ -430,6 +469,33 @@ class DatabaseHelper {
         average_cost REAL NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (product_id) REFERENCES products (id)
+      )
+    ''');
+
+    // جدول الصناديق
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cash_boxes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        balance REAL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+    // جدول حركات الصناديق
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cash_movements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        box_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        type TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        notes TEXT,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
+        related_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (box_id) REFERENCES cash_boxes (id)
       )
     ''');
   }
@@ -477,6 +543,18 @@ class DatabaseHelper {
         'phone': '0000000000',
       });
       await db.insert('customers', {'name': 'عميل آجل', 'phone': '1111111111'});
+
+      // إضافة الصناديق الافتراضية
+      await db.insert('cash_boxes', {
+        'name': 'الصندوق اليومي',
+        'balance': 0.0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      await db.insert('cash_boxes', {
+        'name': 'الصندوق الرئيسي',
+        'balance': 0.0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
     }
   }
 

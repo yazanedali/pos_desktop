@@ -2,6 +2,7 @@
 import 'package:pos_desktop/database/database_helper.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/sales_invoice.dart';
+import 'dart:math';
 
 class SalesInvoiceService {
   final DatabaseHelper _dbHelper = DatabaseHelper();
@@ -172,7 +173,7 @@ class SalesInvoiceService {
     }
   }
 
-  // الحصول على إحصائيات المبيعات
+  // الحصول على إحصائيات المبيعات مع صافي ربح اليوم
   Future<Map<String, dynamic>> getSalesStatistics() async {
     final db = await _dbHelper.database;
 
@@ -206,18 +207,44 @@ class SalesInvoiceService {
       final todaySales =
           (todaySalesResult.first['sum'] as num?)?.toDouble() ?? 0.0;
 
+      // ✅ **صافي ربح اليوم** - NEW
+      final todayProfitResult = await db.rawQuery(
+        '''
+      SELECT 
+        SUM((si.total - COALESCE(si_items.purchase_cost, 0))) as profit
+      FROM sales_invoices si
+      LEFT JOIN (
+        SELECT 
+          invoice_id,
+          SUM(quantity * unit_quantity * (
+            SELECT purchase_price FROM products p WHERE p.id = sii.product_id
+          )) as purchase_cost
+        FROM sales_invoice_items sii
+        GROUP BY invoice_id
+      ) si_items ON si.id = si_items.invoice_id
+      WHERE si.date = ?
+    ''',
+        [todayFormatted],
+      );
+
+      final todayNetProfit =
+          (todayProfitResult.first['profit'] as num?)?.toDouble() ?? 0.0;
+
       return {
         'totalInvoices': totalInvoices,
         'totalSales': totalSales,
         'averageInvoice': averageInvoice,
         'todaySales': todaySales,
+        'todayNetProfit': todayNetProfit, // ✅ إضافة صافي الربح اليومي
       };
     } catch (e) {
+      print('❌ خطأ في حساب الإحصائيات: $e');
       return {
         'totalInvoices': 0,
         'totalSales': 0.0,
         'averageInvoice': 0.0,
         'todaySales': 0.0,
+        'todayNetProfit': 0.0, // ✅ القيمة الافتراضية
       };
     }
   }
@@ -333,16 +360,9 @@ class SalesInvoiceService {
     String paymentMethod = 'نقدي',
     double paidAmount = 0.0,
     double remainingAmount = 0.0,
+    double? originalTotal,
   }) async {
     final db = await _dbHelper.database;
-
-    // تحديد نوع الدفع وحالة السداد
-    final String paymentType = (remainingAmount > 0) ? 'آجل' : 'نقدي';
-    final String paymentStatus = _determinePaymentStatus(
-      paidAmount,
-      total,
-      remainingAmount,
-    );
 
     String? finalCustomerName = customerName;
 
@@ -363,32 +383,74 @@ class SalesInvoiceService {
     }
 
     await db.transaction((txn) async {
+      double finalPaidAmount = paidAmount;
+      double finalRemainingAmount = remainingAmount;
+      String finalPaymentMethod = paymentMethod;
+
+      // 1. إذا كان هناك دين متبقي، نتحقق من محفظة العميل أولاً (دمج المحفظة بالدين)
+      if (customerId != null && finalRemainingAmount > 0) {
+        final List<Map<String, dynamic>> customers = await txn.query(
+          'customers',
+          columns: ['wallet_balance'],
+          where: 'id = ?',
+          whereArgs: [customerId],
+        );
+        if (customers.isNotEmpty) {
+          double walletBal =
+              (customers.first['wallet_balance'] as num).toDouble();
+          if (walletBal > 0) {
+            double amountToUseFromWallet = min(finalRemainingAmount, walletBal);
+            finalRemainingAmount -= amountToUseFromWallet;
+            finalPaidAmount += amountToUseFromWallet;
+
+            // تحديث المحفظة
+            await txn.rawUpdate(
+              'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?',
+              [amountToUseFromWallet, customerId],
+            );
+
+            // تحديث طريقة الدفع إذا تغيرت الحالة
+            if (finalPaymentMethod == 'نقدي' && amountToUseFromWallet > 0) {
+              finalPaymentMethod = 'نقدي + رصيد';
+            }
+          }
+        }
+      }
+
+      // إعادة حساب الحالة بعد استهلاك المحفظة
+      final String finalPaymentStatus = _determinePaymentStatus(
+        finalPaidAmount,
+        total,
+        finalRemainingAmount,
+      );
+      final String finalPaymentType =
+          (finalRemainingAmount > 0) ? 'آجل' : 'نقدي';
+
       // إدخال الفاتورة الرئيسية
       final Map<String, dynamic> invoiceData = {
         'invoice_number': invoiceNumber,
         'date': date,
         'time': time,
         'total': total,
-        'paid_amount': paidAmount,
-        'remaining_amount': remainingAmount,
+        'paid_amount': finalPaidAmount,
+        'remaining_amount': finalRemainingAmount,
         'cashier': cashier,
         'customer_id': customerId,
         'customer_name': finalCustomerName,
-        'payment_method': paymentMethod,
-        'payment_type': paymentType,
-        'payment_status': paymentStatus,
-        'original_total': total,
+        'payment_method': finalPaymentMethod,
+        'payment_type': finalPaymentType,
+        'payment_status': finalPaymentStatus,
+        'original_total': originalTotal ?? total,
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      // نظف البيانات - إذا customer_name بيكون null، امسحه من البيانات
+      // نظف البيانات
       invoiceData.removeWhere((key, value) => value == null);
 
       final invoiceId = await txn.insert('sales_invoices', invoiceData);
 
       // إدخال عناصر الفاتورة وتحديث المخزون
       for (final item in items) {
-        // 1. إدخال عنصر الفاتورة مع unit_quantity و unit_name
         await txn.insert('sales_invoice_items', {
           'invoice_id': invoiceId,
           'product_id': item.productId,
@@ -396,33 +458,55 @@ class SalesInvoiceService {
           'price': item.price,
           'quantity': item.quantity,
           'total': item.total,
-          'unit_quantity': item.unitQuantity, // ⬅️ عدد الحبات في الوحدة
-          'unit_name': item.unitName, // ⬅️ اسم الحزمة (كرتونة، علبة، إلخ)
+          'unit_quantity': item.unitQuantity,
+          'unit_name': item.unitName,
         });
 
-        // 2. تحديث المخزون
         final totalQuantity = item.quantity * item.unitQuantity;
-        final result = await txn.rawUpdate(
+        final stockUpdateResult = await txn.rawUpdate(
           '''
-    UPDATE products 
-    SET stock = stock - ?, 
-        updated_at = CURRENT_TIMESTAMP 
-    WHERE id = ? AND stock >= ?
-  ''',
+          UPDATE products 
+          SET stock = stock - ?, 
+              updated_at = CURRENT_TIMESTAMP 
+          WHERE id = ? AND stock >= ?
+          ''',
           [totalQuantity, item.productId, totalQuantity],
         );
 
-        if (result == 0) {
+        if (stockUpdateResult == 0) {
           throw Exception('المخزون غير كافي للمنتج ${item.productName}');
         }
       }
 
-      // 3. خصم من المحفظة إذا كان الدفع من الرصيد
-      if (paymentMethod == 'من الرصيد' && customerId != null) {
-        await txn.rawUpdate(
-          'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?',
-          [paidAmount, customerId],
+      // 3. خصم إضافي من المحفظة إذا كان الخيار المختار هو "من الرصيد"
+      // (هذا الجزء كان موجوداً وسأبقي عليه كخيار يدوي، ولكن المنطق أعلاه يقوم بالتغطية التلقائية للدين)
+      if (paymentMethod == 'من الرصيد' &&
+          customerId != null &&
+          paidAmount > 0) {
+        // بما أننا قمنا بخصم الجزء "الآجل" تلقائياً أعلاه،
+        // هنا نخصم الـ paidAmount الأصلي إذا كان المستخدم اختار صراحةً الدفع من الرصيد
+        // ملاحظة: المنطق العلوي يغطي حالة "لو عليه دين ينطرح من الرصيد"
+        // أما هنا فهو حالة "دفع يدوي من الرصيد"
+
+        // التحقق من الرصيد المتبقي مجدداً بعد العملية العلوية
+        final List<Map<String, dynamic>> customers2 = await txn.query(
+          'customers',
+          columns: ['wallet_balance'],
+          where: 'id = ?',
+          whereArgs: [customerId],
         );
+        double currentW =
+            (customers2.first['wallet_balance'] as num).toDouble();
+        if (currentW >= paidAmount) {
+          await txn.rawUpdate(
+            'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?',
+            [paidAmount, customerId],
+          );
+        } else {
+          // إذا لم يعد الرصيد كافياً بعد التغطية التلقائية للدين
+          // (هذه الحالة نادرة وتحدث لو المستخدم حدد دفع مبلغ نقدي كبير من الرصيد وهو أصلاً عنده دين سيغطي الرصيد)
+          throw Exception('الرصيد في المحفظة غير كافٍ');
+        }
       }
     });
 
