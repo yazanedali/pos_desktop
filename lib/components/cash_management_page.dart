@@ -29,9 +29,10 @@ class _CashManagementPageState extends State<CashManagementPage> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final boxes = await _cashQueries.getAllCashBoxes();
+    // تم إضافة 'إيداع / تغذية' للقائمة لجلبها في السجل
     final history = await _cashQueries.getMovementHistory(
       limit: 50,
-      types: ['تحويل', 'سحب / مصاريف'],
+      types: ['تحويل', 'سحب / مصاريف', 'إيداع / تغذية'],
     );
 
     setState(() {
@@ -41,13 +42,121 @@ class _CashManagementPageState extends State<CashManagementPage> {
     });
   }
 
+  // --- نافذة الإيداع الجديدة ---
+  Future<void> _showDepositDialog() async {
+    final amountController = TextEditingController();
+    final noteController = TextEditingController();
+    String selectedBox = 'الصندوق الرئيسي'; // الافتراضي
+
+    await showDialog(
+      context: context,
+      builder:
+          (context) => StatefulBuilder(
+            builder:
+                (context, setDialogState) => AlertDialog(
+                  title: const Row(
+                    children: [
+                      Icon(Icons.add_circle, color: Colors.green),
+                      SizedBox(width: 8),
+                      Text("إيداع / تغذية صندوق"),
+                    ],
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: selectedBox,
+                        decoration: const InputDecoration(
+                          labelText: "إيداع في",
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items:
+                            ['الصندوق اليومي', 'الصندوق الرئيسي']
+                                .map(
+                                  (b) => DropdownMenuItem(
+                                    value: b,
+                                    child: Text(b),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged:
+                            (val) => setDialogState(() => selectedBox = val!),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: amountController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: "المبلغ",
+                          border: OutlineInputBorder(),
+                          suffixText: "شيكل",
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: noteController,
+                        decoration: const InputDecoration(
+                          labelText: "المصدر / البيان",
+                          hintText: "مثلاً: رصيد افتتاحي، تمويل...",
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("إلغاء"),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () async {
+                        final amount = double.tryParse(amountController.text);
+                        final note = noteController.text.trim();
+
+                        if (amount == null || amount <= 0 || note.isEmpty) {
+                          TopAlert.showError(
+                            context: context,
+                            message: "يرجى تعبئة البيانات بشكل صحيح",
+                          );
+                          return;
+                        }
+
+                        await _cashService.recordDeposit(
+                          amount: amount,
+                          boxName: selectedBox,
+                          source: note,
+                        );
+
+                        if (mounted) Navigator.pop(context);
+                        TopAlert.showSuccess(
+                          context: context,
+                          message: "تم الإيداع بنجاح",
+                        );
+                        _loadData();
+                      },
+                      child: const Text("تأكيد الإيداع"),
+                    ),
+                  ],
+                ),
+          ),
+    );
+  }
+
+  // ... (دوال التحويل والسحب والحذف تبقى كما هي في كودك السابق) ...
   Future<void> _showTransferDialog() async {
+    // ... (نفس الكود السابق)
     final amountController = TextEditingController();
     final dailyBox = _boxes.firstWhere(
       (b) => b.name == 'الصندوق اليومي',
       orElse: () => CashBox(name: ''),
     );
-
     await showDialog(
       context: context,
       builder:
@@ -114,10 +223,10 @@ class _CashManagementPageState extends State<CashManagementPage> {
   }
 
   Future<void> _showWithdrawDialog() async {
+    // ... (نفس الكود السابق)
     final amountController = TextEditingController();
     final reasonController = TextEditingController();
     String selectedBox = 'الصندوق الرئيسي';
-
     await showDialog(
       context: context,
       builder:
@@ -179,7 +288,6 @@ class _CashManagementPageState extends State<CashManagementPage> {
                         final reason = reasonController.text.trim();
                         if (amount == null || amount <= 0 || reason.isEmpty)
                           return;
-
                         final box = _boxes.firstWhere(
                           (b) => b.name == selectedBox,
                         );
@@ -190,7 +298,6 @@ class _CashManagementPageState extends State<CashManagementPage> {
                           );
                           return;
                         }
-
                         await _cashService.recordWithdrawal(
                           amount: amount,
                           boxName: selectedBox,
@@ -212,6 +319,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
   }
 
   Future<void> _deleteMovement(int id) async {
+    // ... (نفس الكود السابق)
     final confirm = await showDialog<bool>(
       context: context,
       builder:
@@ -233,7 +341,6 @@ class _CashManagementPageState extends State<CashManagementPage> {
             ],
           ),
     );
-
     if (confirm == true) {
       await _cashQueries.deleteMovement(id);
       _loadData();
@@ -250,7 +357,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
             children: [
               _buildBalanceCards(),
               const SizedBox(height: 12),
-              _buildActionButtons(),
+              _buildActionButtons(), // تم تحديث هذا الجزء
               const SizedBox(height: 12),
               Expanded(child: _buildHistorySection()),
             ],
@@ -258,9 +365,30 @@ class _CashManagementPageState extends State<CashManagementPage> {
         );
   }
 
+  // --- تحديث الأزرار لتشمل زر الإيداع ---
   Widget _buildActionButtons() {
     return Row(
       children: [
+        // زر الإيداع (جديد) - لون أخضر
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: _showDepositDialog,
+            icon: const Icon(Icons.add_circle_outline, size: 18),
+            label: const Text("إيداع / تغذية"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green.shade50,
+              foregroundColor: Colors.green.shade800,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: Colors.green.shade200),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8), // مسافة صغيرة
+        // زر التحويل - لون أزرق
         Expanded(
           child: ElevatedButton.icon(
             onPressed: _showTransferDialog,
@@ -278,7 +406,8 @@ class _CashManagementPageState extends State<CashManagementPage> {
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8), // مسافة صغيرة
+        // زر السحب - لون أحمر
         Expanded(
           child: ElevatedButton.icon(
             onPressed: _showWithdrawDialog,
@@ -300,6 +429,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
     );
   }
 
+  // ... (باقي الدوال _buildBalanceCards و _buildHistorySection تبقى كما هي) ...
   Widget _buildBalanceCards() {
     return Row(
       children: [
@@ -413,8 +543,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
                                       (h) => h['box_name'] == _historyBoxFilter,
                                     )
                                     .toList();
-
-                        if (filteredHistory.isEmpty) {
+                        if (filteredHistory.isEmpty)
                           return const Center(
                             child: Text(
                               "لا توجد نتائج",
@@ -424,7 +553,6 @@ class _CashManagementPageState extends State<CashManagementPage> {
                               ),
                             ),
                           );
-                        }
 
                         return ListView.separated(
                           padding: EdgeInsets.zero,
@@ -478,9 +606,6 @@ class _CashManagementPageState extends State<CashManagementPage> {
                                   color: Colors.grey,
                                 ),
                               ),
-                              // -----------------------------------------------------
-                              // هنا تم تعديل زر الحذف ليصبح أوضح وأسهل في الوصول
-                              // -----------------------------------------------------
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -495,24 +620,20 @@ class _CashManagementPageState extends State<CashManagementPage> {
                                       fontSize: 13,
                                     ),
                                   ),
-                                  const SizedBox(width: 12), // مسافة أكبر
+                                  const SizedBox(width: 12),
                                   InkWell(
                                     onTap: () => _deleteMovement(item['id']),
                                     borderRadius: BorderRadius.circular(8),
                                     child: Container(
-                                      padding: const EdgeInsets.all(
-                                        6,
-                                      ), // مساحة للنقر
+                                      padding: const EdgeInsets.all(6),
                                       decoration: BoxDecoration(
-                                        color: Colors.red.withOpacity(
-                                          0.1,
-                                        ), // خلفية واضحة
+                                        color: Colors.red.withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: const Icon(
                                         Icons.delete_outline,
-                                        size: 20, // أيقونة أكبر
-                                        color: Colors.red, // لون أحمر صريح
+                                        size: 20,
+                                        color: Colors.red,
                                       ),
                                     ),
                                   ),

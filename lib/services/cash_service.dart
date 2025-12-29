@@ -142,6 +142,29 @@ class CashService {
     await _cashQueries.addCashMovement(movement);
   }
 
+  // تسجيل إيداع / تغذية للصندوق (رصيد افتتاحي، تمويل خارجي...)
+  Future<void> recordDeposit({
+    required double amount,
+    required String boxName,
+    required String source, // المصدر أو الملاحظات
+  }) async {
+    final box = await _cashQueries.getCashBoxByName(boxName);
+    if (box == null) return;
+
+    final now = DateTime.now();
+    final movement = CashMovement(
+      boxId: box.id!,
+      amount: amount,
+      type: 'إيداع / تغذية', // نوع الحركة الجديد
+      direction: 'داخل', // يزيد الرصيد
+      notes: source,
+      date: _formatDate(now),
+      time: _formatTime(now),
+    );
+
+    await _cashQueries.addCashMovement(movement);
+  }
+
   String _formatDate(DateTime dt) =>
       "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
 

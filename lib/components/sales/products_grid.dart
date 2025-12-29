@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../models/category.dart';
 import '../../models/product.dart';
 import 'package:pos_desktop/database/product_queries.dart';
-import '/widgets/top_alert.dart';
 
 class ProductsTable extends StatefulWidget {
   final List<Product> products;

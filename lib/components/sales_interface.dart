@@ -156,45 +156,45 @@ class _SalesInterfaceState extends State<SalesInterface>
     await _loadProducts(reset: false);
   }
 
-  void _onSearch(String searchTerm) {
-    setState(() {
-      _searchTerm = searchTerm;
-    });
-    _loadProducts(reset: true);
-  }
+  // void _onSearch(String searchTerm) {
+  //   setState(() {
+  //     _searchTerm = searchTerm;
+  //   });
+  //   _loadProducts(reset: true);
+  // }
 
-  void _onCategorySelected(int? categoryId) {
-    setState(() {
-      _selectedCategoryId = categoryId;
-      // يمكنك تصفير البحث هنا إذا أردت أن يكون الفلتر منفصلاً
-      // _searchTerm = "";
-    });
-    _loadProducts(reset: true);
-  }
+  // void _onCategorySelected(int? categoryId) {
+  //   setState(() {
+  //     _selectedCategoryId = categoryId;
+  //     // يمكنك تصفير البحث هنا إذا أردت أن يكون الفلتر منفصلاً
+  //     // _searchTerm = "";
+  //   });
+  //   _loadProducts(reset: true);
+  // }
 
-  void _clearFilters() {
-    setState(() {
-      _searchTerm = "";
-      _selectedCategoryId = null;
-    });
-    _loadProducts(reset: true);
-  }
+  // void _clearFilters() {
+  //   setState(() {
+  //     _searchTerm = "";
+  //     _selectedCategoryId = null;
+  //   });
+  //   _loadProducts(reset: true);
+  // }
 
   // --- دوال السلة والباركود ---
 
-  void _handleProductFromBarcode(Product product) {
-    if (product.id == null) return;
+  // void _handleProductFromBarcode(Product product) {
+  //   if (product.id == null) return;
 
-    // إضافة المنتج للقائمة المعروضة إذا لم يكن موجوداً (لتحسين تجربة المستخدم)
-    final existsInList = _products.any((p) => p.id == product.id);
-    if (!existsInList) {
-      setState(() {
-        _products.insert(0, product);
-      });
-    }
+  //   // إضافة المنتج للقائمة المعروضة إذا لم يكن موجوداً (لتحسين تجربة المستخدم)
+  //   final existsInList = _products.any((p) => p.id == product.id);
+  //   if (!existsInList) {
+  //     setState(() {
+  //       _products.insert(0, product);
+  //     });
+  //   }
 
-    _addToCart(product);
-  }
+  //   _addToCart(product);
+  // }
 
   void _addToCart(Product product) {
     if (product.stock <= 0) {
