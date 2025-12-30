@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:pos_desktop/database/cash_queries.dart';
 import 'package:pos_desktop/database/customer_queries.dart';
 import 'package:pos_desktop/database/supplier_queries.dart';
 import 'package:pos_desktop/dialogs/add_customer_dialog.dart';
 import 'package:pos_desktop/dialogs/customer_dialog.dart';
+import 'package:pos_desktop/dialogs/customer_statement_dialog.dart';
+import 'package:pos_desktop/dialogs/supplier_dialog.dart';
+import 'package:pos_desktop/models/cash_movement.dart';
 import 'package:pos_desktop/models/debtor_info.dart';
 import 'package:pos_desktop/models/supplier.dart';
-import 'package:pos_desktop/widgets/top_alert.dart';
-import 'package:pos_desktop/dialogs/supplier_dialog.dart';
 import 'package:pos_desktop/services/cash_service.dart';
+import 'package:pos_desktop/widgets/top_alert.dart';
 
 class CustomersAndSuppliersPage extends StatefulWidget {
   const CustomersAndSuppliersPage({super.key});
@@ -66,7 +69,7 @@ class _CustomersAndSuppliersPageState extends State<CustomersAndSuppliersPage>
   }
 }
 
-// ------------------- Customers Tab (Refactored logic from DebtorsPage) -------------------
+// ------------------- Customers Tab (تم التعديل جذرياً) -------------------
 
 class CustomersTab extends StatefulWidget {
   const CustomersTab({super.key});
@@ -77,7 +80,8 @@ class CustomersTab extends StatefulWidget {
 
 class _CustomersTabState extends State<CustomersTab> {
   final CustomerQueries _customerQueries = CustomerQueries();
-  final CashService _cashService = CashService();
+  final CashQueries _cashQueries =
+      CashQueries(); // نستخدم CashQueries للتحكم الدقيق
   late Future<List<DebtorInfo>> _debtorsFuture;
   final TextEditingController _searchController = TextEditingController();
   String _searchTerm = '';
@@ -126,16 +130,19 @@ class _CustomersTabState extends State<CustomersTab> {
     }
   }
 
-  // دالة لسداد دين عميل
-  Future<void> _showPaymentDialog(DebtorInfo debtor) async {
+  // ===================== العمليات الجديدة المنفصلة =====================
+
+  /// 1. سداد دين (العميل يدفع -> الصندوق اليومي)
+  Future<void> _showDebtPaymentDialog(DebtorInfo debtor) async {
+    final amountController = TextEditingController();
+
     if (debtor.totalDebt <= 0) {
-      TopAlert.showSuccess(
+      TopAlert.showError(
         context: context,
-        message: "هذا العميل ليس عليه ديون.",
+        message: "العميل ليس عليه ديون للسداد",
       );
       return;
     }
-    final amountController = TextEditingController();
 
     await showDialog(
       context: context,
@@ -145,31 +152,55 @@ class _CustomersTabState extends State<CustomersTab> {
               children: [
                 Icon(Icons.payment, color: Colors.green),
                 SizedBox(width: 8),
-                Text("سداد دفعة"),
+                Text("استلام دفعة (سداد دين)"),
               ],
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("العميل: ${debtor.customerName}"),
-                const SizedBox(height: 8),
                 Text(
-                  "إجمالي الدين: ${debtor.totalDebt.toStringAsFixed(2)} شيكل",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
+                  "العميل: ${debtor.customerName}",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  "إجمالي الدين الحالي: ${debtor.totalDebt.toStringAsFixed(2)} شيكل",
+                  style: const TextStyle(color: Colors.red),
+                ),
+                const SizedBox(height: 15),
+
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 20, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "سيتم إيداع المبلغ تلقائياً في الصندوق اليومي",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextFormField(
+                const SizedBox(height: 15),
+
+                TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
+                  autofocus: true,
                   decoration: const InputDecoration(
-                    labelText: "المبلغ المدفوع",
+                    labelText: "المبلغ المستلم",
                     border: OutlineInputBorder(),
                     suffixText: "شيكل",
                   ),
-                  autofocus: true,
                 ),
               ],
             ),
@@ -184,83 +215,129 @@ class _CustomersTabState extends State<CustomersTab> {
                   if (amount == null || amount <= 0) {
                     TopAlert.showError(
                       context: context,
-                      message: "يرجى إدخال مبلغ صحيح",
+                      message: "أدخل مبلغ صحيح",
                     );
                     return;
                   }
 
-                  // نسمح بدفع أكثر من الدين ويتحول لرصيد
-                  if (amount > debtor.totalDebt) {
-                    final surplus = amount - debtor.totalDebt;
-                    // نسدد الدين كاملا
-                    await _customerQueries.settleCustomerDebt(
-                      debtor.customerId,
-                      debtor.totalDebt,
+                  final dailyBox = await _cashQueries.getCashBoxByName(
+                    'الصندوق اليومي',
+                  );
+                  if (dailyBox == null) {
+                    TopAlert.showError(
+                      context: context,
+                      message: "الصندوق اليومي غير موجود!",
                     );
-                    // ونضيف الباقي للمحفظة
-                    await _customerQueries.updateCustomerWallet(
-                      debtor.customerId,
-                      surplus,
-                      isDeposit: true,
-                    );
-                  } else {
-                    await _customerQueries.settleCustomerDebt(
-                      debtor.customerId,
-                      amount,
-                    );
+                    return;
                   }
 
-                  // تسجيل في الصندوق اليومي
-                  await _cashService.recordCustomerDebtPayment(
-                    amount: amount,
-                    customerName: debtor.customerName,
+                  // --- التصحيح هنا ---
+                  await _cashQueries.addCashMovement(
+                    CashMovement(
+                      boxId: dailyBox.id!,
+                      amount: amount,
+                      direction: 'داخل', // تمت إضافتها
+                      type: 'سداد دين', // وضعنا السبب هنا بدلاً من reason
+                      notes:
+                          'سداد دين من العميل: ${debtor.customerName}', // وضعنا الوصف هنا بدلاً من description
+                      date: DateTime.now().toString().split(' ')[0],
+                      time: TimeOfDay.now().format(context),
+                      relatedId:
+                          debtor.customerId
+                              .toString(), // ربطنا المعاملة بالعميل
+                    ),
+                  );
+
+                  await _customerQueries.updateCustomerWallet(
+                    debtor.customerId,
+                    amount,
+                    isDeposit: true,
                   );
 
                   if (mounted) {
                     Navigator.pop(context);
+                    _loadData();
                     TopAlert.showSuccess(
                       context: context,
-                      message: 'تم تسجيل الدفعة بنجاح',
+                      message: "تم استلام الدفعة بنجاح",
                     );
-                    _loadData();
                   }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                 ),
-                child: const Text("تأكيد السداد"),
+                child: const Text("تأكيد الاستلام"),
               ),
             ],
           ),
     );
   }
 
-  // إضافة رصيد للمحفظة
-  Future<void> _showAddWalletBalance(DebtorInfo debtor) async {
+  /// 2. إيداع في المحفظة (العميل يضع رصيد -> الصندوق اليومي)
+  Future<void> _showWalletDepositDialog(DebtorInfo debtor) async {
     final amountController = TextEditingController();
+
     await showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text("إيداع في المحفظة"),
+            title: const Row(
+              children: [
+                Icon(Icons.account_balance_wallet, color: Colors.orange),
+                SizedBox(width: 8),
+                Text("إيداع رصيد للمحفظة"),
+              ],
+            ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("العميل: ${debtor.customerName}"),
                 Text(
-                  "الرصيد الحالي: ${debtor.walletBalance}",
-                  style: const TextStyle(
-                    color: Colors.green,
-                    fontWeight: FontWeight.bold,
+                  "العميل: ${debtor.customerName}",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  "رصيد المحفظة الحالي: ${debtor.walletBalance.toStringAsFixed(2)} شيكل",
+                  style: const TextStyle(color: Colors.green),
+                ),
+                const SizedBox(height: 15),
+
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 20,
+                        color: Colors.deepOrange,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "المبلغ سيضاف للصندوق اليومي ورصيد العميل",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 15),
+
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
+                  autofocus: true,
                   decoration: const InputDecoration(
-                    labelText: "المبلغ للإيداع",
+                    labelText: "المبلغ المودع",
+                    border: OutlineInputBorder(),
+                    suffixText: "شيكل",
                   ),
                 ),
               ],
@@ -273,54 +350,329 @@ class _CustomersTabState extends State<CustomersTab> {
               ElevatedButton(
                 onPressed: () async {
                   final amount = double.tryParse(amountController.text);
-                  if (amount == null || amount <= 0) return;
+                  if (amount == null || amount <= 0) {
+                    TopAlert.showError(
+                      context: context,
+                      message: "أدخل مبلغ صحيح",
+                    );
+                    return;
+                  }
+
+                  final dailyBox = await _cashQueries.getCashBoxByName(
+                    'الصندوق اليومي',
+                  );
+                  if (dailyBox == null) {
+                    TopAlert.showError(
+                      context: context,
+                      message: "الصندوق اليومي غير موجود!",
+                    );
+                    return;
+                  }
+
+                  // --- التصحيح هنا ---
+                  await _cashQueries.addCashMovement(
+                    CashMovement(
+                      boxId: dailyBox.id!,
+                      amount: amount,
+                      direction: 'داخل', // تمت إضافتها
+                      type: 'إيداع محفظة', // وضعنا السبب هنا
+                      notes:
+                          'رصيد مقدم من العميل: ${debtor.customerName}', // وضعنا الوصف في الملاحظات
+                      date: DateTime.now().toString().split(' ')[0],
+                      time: TimeOfDay.now().format(context),
+                      relatedId: debtor.customerId.toString(),
+                    ),
+                  );
+
                   await _customerQueries.updateCustomerWallet(
                     debtor.customerId,
                     amount,
                     isDeposit: true,
                   );
+
                   if (mounted) {
                     Navigator.pop(context);
                     _loadData();
                     TopAlert.showSuccess(
                       context: context,
-                      message: "تم إضافة الرصيد",
+                      message: "تم الإيداع بنجاح",
                     );
                   }
                 },
-                child: const Text("إيداع"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text("تأكيد الإيداع"),
               ),
             ],
           ),
     );
   }
 
+  /// 3. دفع للعميل (أنت تدفع له -> اختيار الصندوق)
+  Future<void> _showPayToCustomerDialog(DebtorInfo debtor) async {
+    final amountController = TextEditingController();
+    String selectedBoxName = 'الصندوق اليومي';
+
+    await showDialog(
+      context: context,
+      builder:
+          (context) => StatefulBuilder(
+            builder: (context, setStateDialog) {
+              return AlertDialog(
+                title: const Row(
+                  children: [
+                    Icon(Icons.outbond, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Text("دفع للعميل (صرف)"),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "العميل: ${debtor.customerName}",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      "له في المحفظة: ${debtor.walletBalance.toStringAsFixed(2)} شيكل",
+                      style: const TextStyle(color: Colors.green),
+                    ),
+                    const SizedBox(height: 15),
+
+                    DropdownButtonFormField<String>(
+                      value: selectedBoxName,
+                      decoration: const InputDecoration(
+                        labelText: "خصم من الصندوق",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.money_off),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'الصندوق اليومي',
+                          child: Text("الصندوق اليومي"),
+                        ),
+                        DropdownMenuItem(
+                          value: 'الصندوق الرئيسي',
+                          child: Text("الصندوق الرئيسي"),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        setStateDialog(() => selectedBoxName = val!);
+                      },
+                    ),
+                    const SizedBox(height: 15),
+
+                    TextField(
+                      controller: amountController,
+                      keyboardType: TextInputType.number,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: "المبلغ المدفوع للعميل",
+                        border: OutlineInputBorder(),
+                        suffixText: "شيكل",
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("إلغاء"),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final amount = double.tryParse(amountController.text);
+                      if (amount == null || amount <= 0) {
+                        TopAlert.showError(
+                          context: context,
+                          message: "أدخل مبلغ صحيح",
+                        );
+                        return;
+                      }
+
+                      final box = await _cashQueries.getCashBoxByName(
+                        selectedBoxName,
+                      );
+                      if (box == null) return;
+
+                      if (box.balance < amount) {
+                        TopAlert.showError(
+                          context: context,
+                          message: "رصيد $selectedBoxName غير كافٍ!",
+                        );
+                        return;
+                      }
+
+                      // --- التصحيح هنا ---
+                      await _cashQueries.addCashMovement(
+                        CashMovement(
+                          boxId: box.id!,
+                          amount: amount,
+                          direction: 'خارج', // تمت إضافتها
+                          type: 'صرف للعميل', // السبب
+                          notes:
+                              'سداد للعميل أو إرجاع رصيد: ${debtor.customerName}', // الوصف
+                          date: DateTime.now().toString().split(' ')[0],
+                          time: TimeOfDay.now().format(context),
+                          relatedId: debtor.customerId.toString(),
+                        ),
+                      );
+
+                      await _customerQueries.updateCustomerWallet(
+                        debtor.customerId,
+                        amount,
+                        isDeposit: false,
+                      );
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        _loadData();
+                        TopAlert.showSuccess(
+                          context: context,
+                          message: "تم الدفع للعميل بنجاح",
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text("تأكيد الدفع"),
+                  ),
+                ],
+              );
+            },
+          ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showCustomerDetails(DebtorInfo debtor) async {
+    final fullCustomer = await _customerQueries.getCustomerById(
+      debtor.customerId,
+    );
+    if (fullCustomer != null && mounted) {
+      showDialog(
+        context: context,
+        builder:
+            (c) => CustomerDialog(
+              customer: fullCustomer,
+              debtorInfo: debtor,
+              onEdit: () {
+                Navigator.pop(c);
+                _loadData();
+              },
+            ),
+      );
+    }
+  }
+
+  Future<void> _showCustomerStatement(DebtorInfo debtor) async {
+    final fullCustomer = await _customerQueries.getCustomerById(
+      debtor.customerId,
+    );
+    if (fullCustomer != null && mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => CustomerStatementDialog(customer: fullCustomer),
+      );
+    }
+  }
+
+  Future<void> _deleteCustomer(DebtorInfo debtor) async {
+    final canDelete = await _customerQueries.canDeleteCustomer(
+      debtor.customerId,
+    );
+    if (!canDelete) {
+      TopAlert.showError(
+        context: context,
+        message: "لا يمكن حذف العميل، عليه ديون!",
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text("تأكيد الحذف"),
+            content: Text("حذف العميل '${debtor.customerName}'؟"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("إلغاء"),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text("حذف"),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed == true && mounted) {
+      await _customerQueries.deleteCustomer(debtor.customerId);
+      _loadData();
+      TopAlert.showSuccess(context: context, message: "تم حذف العميل");
+    }
+  }
+
+  // ... (الإستدعاءات والمتغيرات في الأعلى كما هي)
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Controls
+        // Controls (البحث والأزرار) - كما هي
         Padding(
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(12.0),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    hintText: "بحث عن عميل...",
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search),
+                    hintText: "ابحث عن عميل...",
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    suffixIcon:
+                        _searchTerm.isNotEmpty
+                            ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                _search('');
+                              },
+                            )
+                            : null,
                   ),
                   onChanged: _search,
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+              IconButton(
+                onPressed: _refresh,
+                icon: const Icon(Icons.refresh),
+                tooltip: "تحديث",
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.blue.shade100,
+                ),
+              ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
                 onPressed: _addCustomer,
@@ -329,12 +681,68 @@ class _CustomersTabState extends State<CustomersTab> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        // List
+
+        // ================== تعديل الترويسة (Headers) ==================
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade200, // لون خلفية أوضح للترويسة
+            border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+          ),
+          child: const Row(
+            children: [
+              // 1. العميل (مساحة أكبر)
+              Expanded(
+                flex: 4,
+                child: Text(
+                  "العميل",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              // 2. عليه (دين)
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: Text(
+                    "عليه (دين)",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              // 3. له (محفظة)
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: Text(
+                    "له (محفظة)",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              // 4. إجراءات
+              Expanded(
+                flex: 1, // مساحة أقل للإجراءات
+                child: Center(
+                  child: Text(
+                    "إجراءات",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // ================== تعديل القائمة (List) ==================
         Expanded(
           child: FutureBuilder<List<DebtorInfo>>(
             future: _debtorsFuture,
@@ -345,75 +753,251 @@ class _CustomersTabState extends State<CustomersTab> {
               if (!snapshot.hasData || snapshot.data!.isEmpty) {
                 return const Center(child: Text("لا يوجد بيانات"));
               }
+
               final debtors = snapshot.data!;
+
               return ListView.separated(
+                padding: const EdgeInsets.all(8),
                 itemCount: debtors.length,
-                separatorBuilder: (c, i) => const Divider(),
+                separatorBuilder:
+                    (c, i) =>
+                        const SizedBox(height: 4), // مسافة بسيطة بين الكروت
                 itemBuilder: (context, index) {
                   final debtor = debtors[index];
-                  return ListTile(
-                    leading: CircleAvatar(child: Text(debtor.customerName[0])),
-                    title: Text(debtor.customerName),
-                    subtitle: Row(
-                      children: [
-                        Text(
-                          debtor.netBalance < 0
-                              ? "عليه (دين): ${(debtor.netBalance.abs()).toStringAsFixed(1)}"
-                              : debtor.netBalance > 0
-                              ? "له (رصيد): ${debtor.netBalance.toStringAsFixed(1)}"
-                              : "متعادل (0.0)",
-                          style: TextStyle(
-                            color:
-                                debtor.netBalance < 0
-                                    ? Colors.red
-                                    : debtor.netBalance > 0
-                                    ? Colors.green
-                                    : Colors.grey,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                  final hasDebt = debtor.totalDebt > 0;
+                  final hasWallet = debtor.walletBalance > 0;
+
+                  return Card(
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.account_balance_wallet,
-                            color: Colors.orange,
-                          ),
-                          tooltip: "إيداع رصيد",
-                          onPressed: () => _showAddWalletBalance(debtor),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.payment, color: Colors.green),
-                          tooltip: "سداد دين",
-                          onPressed: () => _showPaymentDialog(debtor),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.visibility,
-                            color: Colors.blue,
-                          ),
-                          onPressed: () async {
-                            final fullCustomer = await _customerQueries
-                                .getCustomerById(debtor.customerId);
-                            if (fullCustomer != null && mounted) {
-                              showDialog(
-                                context: context,
-                                builder:
-                                    (c) => CustomerDialog(
-                                      customer: fullCustomer,
-                                      debtorInfo: debtor,
-                                      onEdit: () {
-                                        Navigator.pop(c);
-                                      },
+                    child: Padding(
+                      // استخدام Padding و Row بدلاً من ListTile لضمان المحاذاة
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          // 1. العميل (نفس الـ Flex: 4)
+                          Expanded(
+                            flex: 4,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  debtor.customerName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                if (debtor.phone != null &&
+                                    debtor.phone!.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      debtor.phone!,
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
                                     ),
-                              );
-                            }
-                          },
-                        ),
-                      ],
+                                  ),
+                              ],
+                            ),
+                          ),
+
+                          // 2. عليه (دين) (نفس الـ Flex: 2)
+                          Expanded(
+                            flex: 2,
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      hasDebt
+                                          ? Colors.red.shade50
+                                          : Colors.grey.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color:
+                                        hasDebt
+                                            ? Colors.red.shade100
+                                            : Colors.transparent,
+                                  ),
+                                ),
+                                child: Text(
+                                  debtor.totalDebt.toStringAsFixed(2),
+                                  style: TextStyle(
+                                    color:
+                                        hasDebt ? Colors.red : Colors.black45,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // 3. له (محفظة) (نفس الـ Flex: 2)
+                          Expanded(
+                            flex: 2,
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      hasWallet
+                                          ? Colors.green.shade50
+                                          : Colors.grey.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color:
+                                        hasWallet
+                                            ? Colors.green.shade100
+                                            : Colors.transparent,
+                                  ),
+                                ),
+                                child: Text(
+                                  debtor.walletBalance.toStringAsFixed(2),
+                                  style: TextStyle(
+                                    color:
+                                        hasWallet
+                                            ? Colors.green
+                                            : Colors.black45,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // 4. إجراءات (نفس الـ Flex: 1)
+                          Expanded(
+                            flex: 1,
+                            child: Center(
+                              child: PopupMenuButton<String>(
+                                icon: const Icon(
+                                  Icons.more_vert,
+                                  color: Colors.grey,
+                                ),
+                                tooltip: "خيارات",
+                                onSelected: (value) {
+                                  switch (value) {
+                                    case 'pay_debt':
+                                      _showDebtPaymentDialog(debtor);
+                                      break;
+                                    case 'deposit_wallet':
+                                      _showWalletDepositDialog(debtor);
+                                      break;
+                                    case 'pay_customer':
+                                      _showPayToCustomerDialog(debtor);
+                                      break;
+                                    case 'view':
+                                      _showCustomerDetails(debtor);
+                                      break;
+                                    case 'statement':
+                                      _showCustomerStatement(debtor);
+                                      break;
+                                    case 'delete':
+                                      _deleteCustomer(debtor);
+                                      break;
+                                  }
+                                },
+                                itemBuilder:
+                                    (context) => [
+                                      if (debtor.totalDebt > 0)
+                                        const PopupMenuItem(
+                                          value: 'pay_debt',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.payment,
+                                                color: Colors.green,
+                                                size: 20,
+                                              ),
+                                              SizedBox(width: 8),
+                                              Text("سداد دفعة"),
+                                            ],
+                                          ),
+                                        ),
+                                      const PopupMenuItem(
+                                        value: 'deposit_wallet',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.add_card,
+                                              color: Colors.orange,
+                                              size: 20,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text("إيداع للمحفظة"),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'pay_customer',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.outbond,
+                                              color: Colors.blue,
+                                              size: 20,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text("دفع للعميل"),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuDivider(),
+                                      const PopupMenuItem(
+                                        value: 'view',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.visibility, size: 20),
+                                            SizedBox(width: 8),
+                                            Text("التفاصيل"),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'statement',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.receipt_long, size: 20),
+                                            SizedBox(width: 8),
+                                            Text("كشف حساب"),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.delete,
+                                              color: Colors.red,
+                                              size: 20,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text("حذف"),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -426,8 +1010,8 @@ class _CustomersTabState extends State<CustomersTab> {
   }
 }
 
-// ------------------- Suppliers Tab -------------------
-
+// ------------------- Suppliers Tab (كما هو دون تغيير) -------------------
+// ... (بقيت الكود للـ SuppliersTab كما أرسلته سابقاً) ...
 class SuppliersTab extends StatefulWidget {
   const SuppliersTab({super.key});
 
@@ -483,7 +1067,6 @@ class _SuppliersTabState extends State<SuppliersTab> {
   }
 
   Future<void> _deleteSupplier(Supplier supplier) async {
-    // التحقق إذا كان للمورد فواتير أو معاملات
     final hasTransactions = await _supplierQueries.hasSupplierTransactions(
       supplier.id!,
     );

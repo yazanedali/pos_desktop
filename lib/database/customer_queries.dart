@@ -1,24 +1,20 @@
-// database/customer_queries.dart
+// lib/database/customer_queries.dart
 
 import 'package:pos_desktop/database/database_helper.dart';
 import 'package:pos_desktop/models/CustomerDebtDetail.dart';
 import 'package:pos_desktop/models/customer.dart';
 import 'package:pos_desktop/models/debtor_info.dart';
 import 'dart:math';
-
 import 'package:pos_desktop/models/report_models.dart';
 
 class CustomerQueries {
   final DatabaseHelper _dbHelper = DatabaseHelper();
 
-  // جلب كل العملاء من قاعدة البيانات
+  // جلب كل العملاء
   Future<List<Customer>> getAllCustomers() async {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> maps = await db.query('customers');
-
-    return List.generate(maps.length, (i) {
-      return Customer.fromMap(maps[i]);
-    });
+    return List.generate(maps.length, (i) => Customer.fromMap(maps[i]));
   }
 
   // إضافة عميل جديد
@@ -27,12 +23,9 @@ class CustomerQueries {
     return await db.insert('customers', customer.toMap());
   }
 
+  // جلب الديون المتراكمة (للمتعثرين فقط)
   Future<List<DebtorInfo>> getDebtorsWithOutstandingBalance() async {
     final db = await _dbHelper.database;
-
-    // استعلام SQL يقوم بربط جدول العملاء بجدول الفواتير
-    // ثم يجمع المبالغ المتبقية لكل عميل
-    // ويعيد فقط العملاء الذين لديهم دين أكبر من صفر
     final List<Map<String, dynamic>> maps = await db.rawQuery('''
       SELECT
         c.id as customerId,
@@ -45,23 +38,17 @@ class CustomerQueries {
       ORDER BY totalDebt DESC
     ''');
 
-    if (maps.isEmpty) {
-      return [];
-    }
-
-    // تحويل النتائج إلى قائمة من كائنات DebtorInfo
-    return List.generate(maps.length, (i) {
-      return DebtorInfo.fromMap(maps[i]);
-    });
+    if (maps.isEmpty) return [];
+    return List.generate(maps.length, (i) => DebtorInfo.fromMap(maps[i]));
   }
 
+  // جلب جميع العملاء مع ديونهم وأرصدة محافظهم (يدعم البحث)
   Future<List<DebtorInfo>> getAllCustomersWithDebt({
     String searchTerm = '',
   }) async {
     final db = await _dbHelper.database;
 
-    // بناء شرط البحث
-    String whereClause = '1=1'; // شرط أساسي دائماً صحيح
+    String whereClause = '1=1';
     List<dynamic> whereArgs = [];
 
     if (searchTerm.isNotEmpty) {
@@ -69,34 +56,29 @@ class CustomerQueries {
       whereArgs.addAll(['%$searchTerm%', '%$searchTerm%']);
     }
 
-    //   ***** الاستعلام الآن أبسط وأكثر دقة مع دعم البحث *****
     final List<Map<String, dynamic>> maps = await db.rawQuery('''
-    SELECT
-      c.id as customerId,
-      c.name as customerName,
-      c.phone as phone,
-      c.address as address,
-      c.wallet_balance as walletBalance, -- <-- جلب الرصيد
-      -- فقط اجمع المبالغ المتبقية من كل الفواتير
-      COALESCE(SUM(si.remaining_amount), 0) as totalDebt
-    FROM customers c
-    LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.remaining_amount > 0
-    WHERE $whereClause
-    GROUP BY c.id, c.name, c.phone, c.address, c.wallet_balance
-    ORDER BY totalDebt DESC, c.name ASC
-  ''', whereArgs);
+      SELECT
+        c.id as customerId,
+        c.name as customerName,
+        c.phone as phone,
+        c.address as address,
+        c.wallet_balance as walletBalance,
+        COALESCE(SUM(si.remaining_amount), 0) as totalDebt
+      FROM customers c
+      LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.remaining_amount > 0
+      WHERE $whereClause
+      GROUP BY c.id, c.name, c.phone, c.address, c.wallet_balance
+      ORDER BY totalDebt DESC, c.name ASC
+    ''', whereArgs);
 
-    return List.generate(maps.length, (i) {
-      return DebtorInfo.fromMap(maps[i]);
-    });
+    return List.generate(maps.length, (i) => DebtorInfo.fromMap(maps[i]));
   }
 
+  // تسديد دين محدد بمبلغ معين
   Future<void> settleCustomerDebt(int customerId, double paymentAmount) async {
     final db = await _dbHelper.database;
 
-    // استخدام transaction لضمان تنفيذ كل العمليات كوحدة واحدة
     await db.transaction((txn) async {
-      // 1. جلب كل الفواتير غير المسددة بالكامل للعميل، مرتبة من الأقدم للأحدث
       List<Map<String, dynamic>> unpaidInvoices = await txn.query(
         'sales_invoices',
         where: 'customer_id = ? AND remaining_amount > 0',
@@ -105,41 +87,26 @@ class CustomerQueries {
       );
 
       double remainingPayment = paymentAmount;
+      final now = DateTime.now();
 
-      // 2. المرور على الفواتير وتوزيع مبلغ الدفعة عليها
       for (var invoice in unpaidInvoices) {
-        if (remainingPayment <= 0) break; // توقف إذا تم توزيع كامل المبلغ
+        if (remainingPayment <= 0) break;
 
         double debtOnInvoice = (invoice['remaining_amount'] as num).toDouble();
         double paidOnInvoice = (invoice['paid_amount'] as num).toDouble();
         int invoiceId = invoice['id'] as int;
 
-        // تحديد المبلغ الذي سيتم دفعه لهذه الفاتورة تحديدًا
         double amountToPayForThisInvoice = min(remainingPayment, debtOnInvoice);
 
-        // حساب القيم الجديدة
         double newRemaining = debtOnInvoice - amountToPayForThisInvoice;
         double newPaidAmount = paidOnInvoice + amountToPayForThisInvoice;
 
-        // تحديد حالة الدفع ونوعه بناءً على القيم الجديدة
-        String newPaymentStatus;
-        String newPaymentType;
+        String newPaymentStatus = newRemaining <= 0 ? 'مدفوع' : 'جزئي';
+        // لا نغير نوع الدفع الأصلي للفاتورة (آجل) عادة، ولكن نحدث الحالة
+        // أو يمكن تحديثه إذا أصبحت مدفوعة بالكامل، الخيار لك.
+        // هنا سنبقيه كما هو أو نحدثه حسب منطقك السابق:
+        String newPaymentType = newRemaining <= 0 ? 'نقدي' : 'آجل';
 
-        if (newRemaining <= 0) {
-          // إذا أصبح المتبقي صفر أو أقل، الفاتورة مدفوعة بالكامل
-          newPaymentStatus = 'مدفوع';
-          newPaymentType = 'نقدي';
-        } else if (newPaidAmount > 0) {
-          // إذا دفع جزء من الفاتورة
-          newPaymentStatus = 'جزئي';
-          newPaymentType = 'آجل';
-        } else {
-          // إذا ما دفع ولا قرش (حالة احتياطية)
-          newPaymentStatus = 'غير مدفوع';
-          newPaymentType = 'آجل';
-        }
-
-        // 3. تحديث الفاتورة الحالية في قاعدة البيانات
         await txn.update(
           'sales_invoices',
           {
@@ -152,8 +119,6 @@ class CustomerQueries {
           whereArgs: [invoiceId],
         );
 
-        // 4. إضافة سجل السداد في جدول payment_records
-        final now = DateTime.now();
         await txn.insert('payment_records', {
           'invoice_id': invoiceId,
           'payment_date':
@@ -165,7 +130,7 @@ class CustomerQueries {
           'notes': 'سداد دين من صفحة العملاء',
           'created_at': now.toIso8601String(),
         });
-        // 6. إنقاص المبلغ الموزع من إجمالي الدفعة
+
         remainingPayment -= amountToPayForThisInvoice;
       }
     });
@@ -178,10 +143,7 @@ class CustomerQueries {
       where: 'id = ?',
       whereArgs: [id],
     );
-
-    if (maps.isNotEmpty) {
-      return Customer.fromMap(maps.first);
-    }
+    if (maps.isNotEmpty) return Customer.fromMap(maps.first);
     return null;
   }
 
@@ -197,7 +159,6 @@ class CustomerQueries {
 
   Future<void> deleteCustomer(int customerId) async {
     final db = await _dbHelper.database;
-
     await db.delete('customers', where: 'id = ?', whereArgs: [customerId]);
   }
 
@@ -205,9 +166,7 @@ class CustomerQueries {
     final debtor = await getCustomerById(customerId);
     if (debtor == null) return false;
 
-    // جلب مجموع ديون هذا العميل
     final result = await getAllCustomersWithDebt();
-
     final info = result.firstWhere(
       (d) => d.customerId == customerId,
       orElse:
@@ -236,16 +195,13 @@ class CustomerQueries {
 
       if (openingBalance > 0) {
         final now = DateTime.now();
-        final date =
-            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-        final time =
-            '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
         await txn.insert('sales_invoices', {
           'invoice_number':
               'OP-BAL-$newCustomerId-${now.millisecondsSinceEpoch}',
-          'date': date,
-          'time': time,
+          'date':
+              '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+          'time':
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
           'total': openingBalance,
           'paid_amount': 0.0,
           'remaining_amount': openingBalance,
@@ -265,21 +221,13 @@ class CustomerQueries {
     double newDebt,
   ) async {
     final db = await _dbHelper.database;
-
     final double difference = newDebt - currentDebt;
 
-    // إذا لم يكن هناك تغيير، لا تفعل شيئاً
     if (difference.abs() < 0.01) return;
 
-    // إذا كان الدين الجديد أقل (تسديد أو خصم)
     if (difference < 0) {
-      // استخدم نفس منطق السداد السابق لتوزيع الخصم على الفواتير
-      // الفرق السالب سيتم تحويله إلى موجب لتمريره لدالة السداد
       await settleCustomerDebt(customerId, -difference);
-    }
-    // إذا كان الدين الجديد أكبر (إضافة دين)
-    else {
-      // قم بإنشاء فاتورة وهمية جديدة بقيمة الفرق
+    } else {
       final now = DateTime.now();
       await db.insert('sales_invoices', {
         'invoice_number': 'ADJ-$customerId-${now.millisecondsSinceEpoch}',
@@ -303,7 +251,6 @@ class CustomerQueries {
     int customerId,
   ) async {
     final db = await _dbHelper.database;
-
     final List<Map<String, dynamic>> maps = await db.rawQuery(
       '''
       SELECT 
@@ -340,7 +287,6 @@ class CustomerQueries {
     });
   }
 
-  // دالة لجلب إحصائيات الدفع للتقارير
   Future<PaymentStatistics> getPaymentStatistics(String from, String to) async {
     final db = await _dbHelper.database;
 
@@ -398,9 +344,10 @@ class CustomerQueries {
       if (maps.isEmpty) return;
 
       double currentWallet = (maps.first['wallet_balance'] as num).toDouble();
+      final now = DateTime.now();
 
       if (isDeposit) {
-        // إذا كان إيداع، نتحقق أولاً إذا كان عليه ديون
+        // التحقق من الديون
         final List<Map<String, dynamic>> debtItems = await txn.rawQuery(
           '''
           SELECT COALESCE(SUM(remaining_amount), 0) as totalDebt
@@ -413,14 +360,8 @@ class CustomerQueries {
         double totalDebt = (debtItems.first['totalDebt'] as num).toDouble();
 
         if (totalDebt > 0) {
-          // يوجد دين، نسدده أولاً من مبلغ الإيداع
           double amountToSettle = min(amount, totalDebt);
 
-          // دالة السداد المبرمجة مسبقاً (سنقوم بتمرير الـ txn لو كانت تدعم ذلك،
-          // ولكن بما أنها تستخدم _dbHelper.database داخلياً،
-          // فالأفضل مراجعة settleCustomerDebt لتقبل txn أو كتابة المنطق هنا)
-
-          // منطق السداد (منسوخ باختصار ليعمل داخل الـ txn)
           List<Map<String, dynamic>> unpaidInvoices = await txn.query(
             'sales_invoices',
             where: 'customer_id = ? AND remaining_amount > 0',
@@ -446,6 +387,20 @@ class CustomerQueries {
               where: 'id = ?',
               whereArgs: [invId],
             );
+
+            // **إضافة مهمة: تسجيل حركة السداد لضمان دقة التقارير**
+            await txn.insert('payment_records', {
+              'invoice_id': invId,
+              'payment_date':
+                  '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+              'payment_time':
+                  '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+              'amount': toPay,
+              'payment_method': 'محفظة', // تميز الحركة بأنها عبر المحفظة
+              'notes': 'سداد آلي عند الإيداع في المحفظة',
+              'created_at': now.toIso8601String(),
+            });
+
             remainingPayment -= toPay;
           }
 
@@ -459,7 +414,7 @@ class CustomerQueries {
             );
           }
         } else {
-          // لا يوجد دين، أضف كامل المبلغ للمحفظة
+          // لا يوجد دين، المبلغ كامل للمحفظة
           await txn.update(
             'customers',
             {'wallet_balance': currentWallet + amount},
@@ -475,6 +430,61 @@ class CustomerQueries {
           where: 'id = ?',
           whereArgs: [customerId],
         );
+      }
+    });
+  }
+
+  // في database/customer_queries.dart
+  // في customer_queries.dart، أعد كتابة الدالة:
+  Future<void> payCustomerFromCashbox(
+    int customerId,
+    double amount,
+    String boxName,
+    String? notes,
+  ) async {
+    final db = await _dbHelper.database;
+
+    await db.transaction((txn) async {
+      // جلب العميل
+      final List<Map<String, dynamic>> customerData = await txn.query(
+        'customers',
+        where: 'id = ?',
+        whereArgs: [customerId],
+      );
+
+      if (customerData.isEmpty) {
+        throw Exception('العميل غير موجود');
+      }
+
+      // زيادة رصيد المحفظة (دين منك للعميل)
+      double currentWallet =
+          (customerData.first['wallet_balance'] as num).toDouble();
+      double newWalletBalance = currentWallet + amount;
+
+      await txn.update(
+        'customers',
+        {'wallet_balance': newWalletBalance},
+        where: 'id = ?',
+        whereArgs: [customerId],
+      );
+
+      // تسجيل الحركة (اختياري - إذا كنت تريد تتبع مدفوعات الصندوق)
+      final now = DateTime.now();
+      try {
+        await txn.insert('customer_cashbox_payments', {
+          'customer_id': customerId,
+          'amount': amount,
+          'box_name': boxName,
+          'date':
+              '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+          'time':
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+          'notes': notes ?? 'دفع من الصندوق للعميل',
+          'created_at': now.toIso8601String(),
+        });
+      } catch (e) {
+        // إذا كان الجدول غير موجود، تخطي الخطأ
+        print('ملاحظة: جدول customer_cashbox_payments غير موجود: $e');
       }
     });
   }

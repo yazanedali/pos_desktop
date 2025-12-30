@@ -3,12 +3,16 @@ class DebtorInfo {
   final String customerName;
   final double totalDebt;
   final double walletBalance; // <--
+  final String? phone;
+  final String? address;
 
   DebtorInfo({
     required this.customerId,
     required this.customerName,
     required this.totalDebt,
     this.walletBalance = 0.0,
+    this.phone,
+    this.address,
   });
 
   // الرصيد الصافي: (له - عليه)

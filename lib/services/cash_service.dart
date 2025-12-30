@@ -165,6 +165,30 @@ class CashService {
     await _cashQueries.addCashMovement(movement);
   }
 
+  // في services/cash_service.dart
+  Future<void> recordPaymentToCustomer({
+    required double amount,
+    required String boxName,
+    required String customerName,
+    String? notes,
+  }) async {
+    final box = await _cashQueries.getCashBoxByName(boxName);
+    if (box == null) return;
+
+    final now = DateTime.now();
+    final movement = CashMovement(
+      boxId: box.id!,
+      amount: amount,
+      type: 'دفع للعميل',
+      direction: 'خارج', // لأن المبلغ يخرج من الصندوق
+      notes: 'دفع للعميل: $customerName${notes != null ? " - $notes" : ""}',
+      date: _formatDate(now),
+      time: _formatTime(now),
+    );
+
+    await _cashQueries.addCashMovement(movement);
+  }
+
   String _formatDate(DateTime dt) =>
       "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
 
