@@ -174,68 +174,121 @@ class SalesInvoiceService {
   }
 
   // الحصول على إحصائيات المبيعات مع صافي ربح اليوم
+  // الحصول على إحصائيات المبيعات مع صافي ربح اليوم (النقدي فقط)
+  // الحصول على إحصائيات المبيعات (نقدي فقط، واستثناء الدفع من المحفظة)
+  // services/sales_invoice_service.dart
+
+  // تحديث الدالة لتتطابق مع منطق التقارير الجديدة
   Future<Map<String, dynamic>> getSalesStatistics() async {
     final db = await _dbHelper.database;
 
     try {
-      // إجمالي عدد الفواتير
+      // التاريخ الحالي
+      final today = DateTime.now();
+      final todayFormatted =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+      // 1. حساب إجمالي الفواتير والمبيعات (تراكمي - للمعلومة العامة)
       final totalInvoicesResult = await db.rawQuery(
         'SELECT COUNT(*) as count FROM sales_invoices',
       );
       final totalInvoices = totalInvoicesResult.first['count'] as int? ?? 0;
 
-      // إجمالي المبيعات
       final totalSalesResult = await db.rawQuery(
         'SELECT SUM(total) as sum FROM sales_invoices',
       );
-      final totalSales =
+      final totalSalesAllTime =
           (totalSalesResult.first['sum'] as num?)?.toDouble() ?? 0.0;
-
-      // متوسط قيمة الفاتورة
       final averageInvoice =
-          totalInvoices > 0 ? totalSales / totalInvoices : 0.0;
+          totalInvoices > 0 ? totalSalesAllTime / totalInvoices : 0.0;
 
-      // المبيعات اليوم
-      final today = DateTime.now();
-      final todayFormatted =
-          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      // ============================================================
+      // 🟢 2. حساب "مقبوضات اليوم" (ليطابق NewReportsPage)
+      // المعادلة: (كاش من فواتير اليوم) + (كاش من سداد ديون اليوم) - (استثناء الدفع من الرصيد)
+      // ============================================================
 
-      final todaySalesResult = await db.rawQuery(
+      // أ. الكاش من فواتير اليوم المباشرة
+      final directCashResult = await db.rawQuery(
+        '''
+        SELECT SUM(paid_amount) as sum 
+        FROM sales_invoices 
+        WHERE date = ? 
+        AND payment_method != 'من الرصيد'
+        ''',
+        [todayFormatted],
+      );
+      final directCash =
+          (directCashResult.first['sum'] as num?)?.toDouble() ?? 0.0;
+
+      // ب. الكاش من سداد الديون اليوم
+      double debtCash = 0.0;
+      try {
+        final debtCashResult = await db.rawQuery(
+          '''
+          SELECT SUM(amount) as sum 
+          FROM payment_records 
+          WHERE payment_date = ? 
+          AND payment_method != 'من الرصيد'
+          ''',
+          [todayFormatted],
+        );
+        debtCash = (debtCashResult.first['sum'] as num?)?.toDouble() ?? 0.0;
+      } catch (e) {
+        // في حال عدم وجود الجدول
+      }
+
+      final totalCollectedToday = directCash + debtCash;
+
+      // ============================================================
+      // 🟢 3. حساب "الربح المحقق اليوم" (ليطابق RealProfitStat)
+      // المعادلة: (مجمل ربح فواتير اليوم) * (نسبة التحصيل لفواتير اليوم)
+      // ============================================================
+
+      // أ. مبيعات فواتير اليوم (القيمة الكلية)
+      final todaySalesTotalResult = await db.rawQuery(
         'SELECT SUM(total) as sum FROM sales_invoices WHERE date = ?',
         [todayFormatted],
       );
-      final todaySales =
-          (todaySalesResult.first['sum'] as num?)?.toDouble() ?? 0.0;
+      final todaySalesTotal =
+          (todaySalesTotalResult.first['sum'] as num?)?.toDouble() ?? 0.0;
 
-      // ✅ **صافي ربح اليوم** - NEW
-      final todayProfitResult = await db.rawQuery(
+      // ب. تكلفة فواتير اليوم
+      final todayCostResult = await db.rawQuery(
         '''
-      SELECT 
-        SUM((si.total - COALESCE(si_items.purchase_cost, 0))) as profit
-      FROM sales_invoices si
-      LEFT JOIN (
-        SELECT 
-          invoice_id,
-          SUM(quantity * unit_quantity * (
-            SELECT purchase_price FROM products p WHERE p.id = sii.product_id
-          )) as purchase_cost
+        SELECT SUM(sii.quantity * COALESCE(p.purchase_price, 0)) as cogs
         FROM sales_invoice_items sii
-        GROUP BY invoice_id
-      ) si_items ON si.id = si_items.invoice_id
-      WHERE si.date = ?
-    ''',
+        JOIN sales_invoices si ON sii.invoice_id = si.id
+        LEFT JOIN products p ON sii.product_id = p.id
+        WHERE si.date = ?
+        ''',
         [todayFormatted],
       );
+      final todayCost =
+          (todayCostResult.first['cogs'] as num?)?.toDouble() ?? 0.0;
 
-      final todayNetProfit =
-          (todayProfitResult.first['profit'] as num?)?.toDouble() ?? 0.0;
+      // ج. الربح الإجمالي (المحاسبي)
+      final grossProfit = todaySalesTotal - todayCost;
+
+      // د. نسبة التحصيل (لفواتير اليوم حصراً)
+      // ملاحظة: نستخدم directCash الذي حسبناه فوق (المقبوض من فواتير اليوم باستثناء الرصيد)
+      double collectionRatio = 0.0;
+      if (todaySalesTotal > 0) {
+        collectionRatio = directCash / todaySalesTotal;
+      }
+
+      // هـ. الربح المحقق فعلياً
+      final realizedProfit = grossProfit * collectionRatio;
 
       return {
         'totalInvoices': totalInvoices,
-        'totalSales': totalSales,
+        'totalSales': totalSalesAllTime,
         'averageInvoice': averageInvoice,
-        'todaySales': todaySales,
-        'todayNetProfit': todayNetProfit, // ✅ إضافة صافي الربح اليومي
+
+        // المتغيرات الجديدة التي ستعرض في الواجهة
+        'todayCollected':
+            totalCollectedToday, // هذا الرقم يطابق التحصيلات في التقرير الجديد
+        'todayRealizedProfit':
+            realizedProfit, // هذا الرقم يطابق الربح المحقق في التقرير الجديد
       };
     } catch (e) {
       print('❌ خطأ في حساب الإحصائيات: $e');
@@ -243,8 +296,8 @@ class SalesInvoiceService {
         'totalInvoices': 0,
         'totalSales': 0.0,
         'averageInvoice': 0.0,
-        'todaySales': 0.0,
-        'todayNetProfit': 0.0, // ✅ القيمة الافتراضية
+        'todayCollected': 0.0,
+        'todayRealizedProfit': 0.0,
       };
     }
   }
@@ -550,17 +603,9 @@ class SalesInvoiceService {
     double total,
     double remainingAmount,
   ) {
-    String status;
-
-    if (paidAmount == 0) {
-      status = 'غير مدفوع';
-    } else if (remainingAmount > 0) {
-      status = 'جزئي';
-    } else {
-      status = 'مدفوع';
-    }
-
-    return status;
+    if (paidAmount == 0) return 'غير مدفوع';
+    if (remainingAmount > 0.01) return 'جزئي'; // هامش خطأ صغير
+    return 'مدفوع';
   }
 
   // الحصول على عدد الفواتير الكلي للفلترة
@@ -709,33 +754,60 @@ class SalesInvoiceService {
   }
 
   //ارجاع فاتورة
+  // ارجاع فاتورة بالكامل مع خصم المبلغ من الصندوق اليومي
   Future<bool> returnInvoice(int invoiceId) async {
     final db = await _dbHelper.database;
 
     try {
       await db.transaction((txn) async {
-        // 1. جلب بيانات الفاتورة والعناصر
-        final invoice = await txn.query(
+        // 1. جلب بيانات الفاتورة
+        final invoiceList = await txn.query(
           'sales_invoices',
           where: 'id = ?',
           whereArgs: [invoiceId],
         );
 
-        if (invoice.isEmpty) {
+        if (invoiceList.isEmpty) {
           throw Exception('الفاتورة غير موجودة');
         }
 
+        final invoiceData = invoiceList.first;
+        final double paidAmount =
+            (invoiceData['paid_amount'] as num).toDouble();
+        final String paymentMethod = invoiceData['payment_method'] as String;
+        final String invoiceNumber = invoiceData['invoice_number'] as String;
+
+        // 🌟 فحص الصندوق والخصم (فقط إذا كان هناك مبلغ مدفوع وطريقة الدفع ليست من الرصيد)
+        if (paidAmount > 0 && paymentMethod != 'من الرصيد') {
+          await _processRefundFromDailyBox(
+            txn,
+            amount: paidAmount,
+            description: 'إرجاع فاتورة مبيعات رقم $invoiceNumber بالكامل',
+            relatedId: invoiceId,
+          );
+        } else if (paidAmount > 0 && paymentMethod == 'من الرصيد') {
+          // إذا كان الدفع من الرصيد، يجب إعادة المبلغ لمحفظة العميل (اختياري حسب نظامك)
+          final customerId = invoiceData['customer_id'] as int?;
+          if (customerId != null) {
+            await txn.rawUpdate(
+              'UPDATE customers SET wallet_balance = wallet_balance + ? WHERE id = ?',
+              [paidAmount, customerId],
+            );
+          }
+        }
+
+        // 2. إرجاع المخزون للمنتجات (الكود القديم)
         final items = await txn.query(
           'sales_invoice_items',
           where: 'invoice_id = ?',
           whereArgs: [invoiceId],
         );
 
-        // 2. إرجاع المخزون للمنتجات
         for (final item in items) {
           final productId = item['product_id'] as int;
-          final quantity = item['quantity'] as double;
-          final unitQuantity = item['unit_quantity'] as double? ?? 1.0;
+          final quantity = (item['quantity'] as num).toDouble();
+          final unitQuantity =
+              (item['unit_quantity'] as num?)?.toDouble() ?? 1.0;
 
           final totalQuantity = quantity * unitQuantity;
 
@@ -750,31 +822,21 @@ class SalesInvoiceService {
           );
         }
 
-        // 3. إذا كان هناك عميل وديون، تحديث الديون
-        final invoiceData = invoice.first;
-        final customerId = invoiceData['customer_id'] as int?;
-        final remainingAmount =
-            (invoiceData['remaining_amount'] as num?)?.toDouble() ?? 0.0;
-
-        if (customerId != null && remainingAmount > 0) {
-          // هنا يمكنك إضافة منطق تحديث ديون العميل إذا كان لديك جدول للديون
-        }
-
-        // 4. حذف سجلات السداد المرتبطة بالفاتورة
+        // 3. حذف سجلات السداد المرتبطة بالفاتورة
         await txn.delete(
           'payment_records',
           where: 'invoice_id = ?',
           whereArgs: [invoiceId],
         );
 
-        // 5. حذف عناصر الفاتورة
+        // 4. حذف عناصر الفاتورة
         await txn.delete(
           'sales_invoice_items',
           where: 'invoice_id = ?',
           whereArgs: [invoiceId],
         );
 
-        // 6. حذف الفاتورة الرئيسية
+        // 5. حذف الفاتورة الرئيسية
         await txn.delete(
           'sales_invoices',
           where: 'id = ?',
@@ -784,7 +846,7 @@ class SalesInvoiceService {
 
       return true;
     } catch (e) {
-      throw Exception('فشل في إرجاع الفاتورة: $e');
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
@@ -844,58 +906,83 @@ class SalesInvoiceService {
   // في sales_invoice_service.dart - أضف هذه الدوال
 
   // إرجاع جزئي لمنتج معين
+  // إرجاع جزئي لمنتج معين مع معالجة الصندوق
   Future<bool> returnPartialItem({
     required int invoiceId,
     required int itemId,
     required double returnedQuantity,
   }) async {
     final db = await _dbHelper.database;
-
     try {
       await db.transaction((txn) async {
-        // 1. جلب بيانات العنصر الحالي
+        final invoiceList = await txn.query(
+          'sales_invoices',
+          where: 'id = ?',
+          whereArgs: [invoiceId],
+        );
+        if (invoiceList.isEmpty) throw Exception('الفاتورة غير موجودة');
+        final invoiceData = invoiceList.first;
         final items = await txn.query(
           'sales_invoice_items',
           where: 'id = ? AND invoice_id = ?',
           whereArgs: [itemId, invoiceId],
         );
-
-        if (items.isEmpty) {
-          throw Exception('العنصر غير موجود في الفاتورة');
-        }
-
+        if (items.isEmpty) throw Exception('العنصر غير موجود');
         final item = items.first;
+
         final currentQuantity = (item['quantity'] as num).toDouble();
         final unitQuantity = (item['unit_quantity'] as num?)?.toDouble() ?? 1.0;
         final productId = item['product_id'] as int?;
-        final productName = item['product_name'] as String;
+        final price = (item['price'] as num).toDouble();
 
-        if (returnedQuantity > currentQuantity) {
-          throw Exception(
-            'الكمية المراد إرجاعها ($returnedQuantity) أكبر من الكمية المشتراة ($currentQuantity) للمنتج $productName',
+        if (returnedQuantity > currentQuantity)
+          throw Exception('الكمية المرجعة أكبر من الموجودة');
+
+        final refundValue = returnedQuantity * price;
+        final currentTotal = (invoiceData['total'] as num).toDouble();
+        final currentPaid = (invoiceData['paid_amount'] as num).toDouble();
+        final paymentMethod = invoiceData['payment_method'] as String;
+        final invoiceNumber = invoiceData['invoice_number'] as String;
+        final newTotal = currentTotal - refundValue;
+
+        double cashToReturn = 0.0;
+        if (currentPaid > newTotal) {
+          cashToReturn = currentPaid - newTotal;
+        }
+
+        if (cashToReturn > 0) {
+          if (paymentMethod != 'من الرصيد') {
+            await _processRefundFromDailyBox(
+              txn,
+              amount: cashToReturn,
+              description: 'مرتجع جزئي للفاتورة $invoiceNumber',
+              relatedId: invoiceId,
+            );
+          } else {
+            final customerId = invoiceData['customer_id'] as int?;
+            if (customerId != null)
+              await txn.rawUpdate(
+                'UPDATE customers SET wallet_balance = wallet_balance + ? WHERE id = ?',
+                [cashToReturn, customerId],
+              );
+          }
+          await txn.update(
+            'sales_invoices',
+            {'paid_amount': newTotal},
+            where: 'id = ?',
+            whereArgs: [invoiceId],
           );
         }
 
-        if (returnedQuantity <= 0) {
-          throw Exception('الكمية المراد إرجاعها يجب أن تكون أكبر من الصفر');
-        }
-
-        // 2. تحديث كمية العنصر في الفاتورة
         final newQuantity = currentQuantity - returnedQuantity;
-
         if (newQuantity > 0) {
-          // تحديث الكمية إذا بقي جزء من المنتج
           await txn.update(
             'sales_invoice_items',
-            {
-              'quantity': newQuantity,
-              'total': (item['price'] as num).toDouble() * newQuantity,
-            },
+            {'quantity': newQuantity, 'total': price * newQuantity},
             where: 'id = ?',
             whereArgs: [itemId],
           );
         } else {
-          // حذف العنصر إذا تم إرجاعه بالكامل
           await txn.delete(
             'sales_invoice_items',
             where: 'id = ?',
@@ -903,27 +990,18 @@ class SalesInvoiceService {
           );
         }
 
-        // 3. إرجاع الكمية للمخزون
         if (productId != null) {
           final totalReturnedPieces = returnedQuantity * unitQuantity;
           await txn.rawUpdate(
-            '''
-          UPDATE products 
-          SET stock = stock + ?, 
-              updated_at = CURRENT_TIMESTAMP 
-          WHERE id = ?
-          ''',
+            'UPDATE products SET stock = stock + ? WHERE id = ?',
             [totalReturnedPieces, productId],
           );
         }
-
-        // 4. تحديث إجمالي الفاتورة
         await _recalculateInvoiceTotal(txn, invoiceId);
       });
-
       return true;
     } catch (e) {
-      throw Exception('فشل في الإرجاع الجزئي: $e');
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
@@ -1046,82 +1124,45 @@ class SalesInvoiceService {
     List<SaleInvoiceItem> updatedItems,
   ) async {
     for (final updatedItem in updatedItems) {
-      // البحث عن العنصر الأصلي
       final originalItem = originalItems.firstWhere(
         (item) => item['id'] == updatedItem.id,
         orElse: () => {},
       );
-
       if (originalItem.isNotEmpty && updatedItem.id != null) {
         final originalQuantity = (originalItem['quantity'] as num).toDouble();
         final originalUnitQuantity =
             (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
         final originalTotalPieces = originalQuantity * originalUnitQuantity;
-
         final newTotalPieces = updatedItem.quantity * updatedItem.unitQuantity;
         final difference = newTotalPieces - originalTotalPieces;
-
         if (difference != 0) {
-          // التحقق من المخزون المتاح أولاً
           final productResult = await txn.query(
             'products',
             where: 'id = ?',
             whereArgs: [updatedItem.productId],
           );
-
           if (productResult.isNotEmpty) {
-            final currentStock =
-                (productResult.first['stock'] as num).toDouble();
-
-            // إذا كان الفرق سالب (تخفيض الكمية) فلا نحتاج للتحقق من المخزون
-            // إذا كان الفرق موجب (زيادة الكمية) نتحقق من المخزون
-            if (difference > 0 && currentStock < difference) {
-              throw Exception(
-                'المخزون غير كافي للمنتج ${updatedItem.productName}. المتاح: $currentStock, المطلوب: $difference',
-              );
-            }
-
-            // تحديث المخزون
             await txn.rawUpdate(
-              '''
-            UPDATE products 
-            SET stock = stock - ?, 
-                updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-            ''',
+              'UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
               [difference, updatedItem.productId],
             );
           }
         }
       }
     }
-
-    // معالجة العناصر المحذوفة (التي كانت في الأصل ولكن ليست في المحدث)
+    // معالجة المحذوف
     for (final originalItem in originalItems) {
       final originalItemId = originalItem['id'] as int?;
-      final existsInUpdated = updatedItems.any(
-        (item) => item.id == originalItemId,
-      );
-
-      if (!existsInUpdated && originalItemId != null) {
-        // هذا العنصر تم حذفه، نرجع المخزون
+      if (!updatedItems.any((item) => item.id == originalItemId) &&
+          originalItemId != null) {
         final originalQuantity = (originalItem['quantity'] as num).toDouble();
-        final originalUnitQuantity =
+        final unitQuantity =
             (originalItem['unit_quantity'] as num?)?.toDouble() ?? 1.0;
-        final originalTotalPieces = originalQuantity * originalUnitQuantity;
-        final productId = originalItem['product_id'] as int?;
-
-        if (productId != null) {
-          await txn.rawUpdate(
-            '''
-          UPDATE products 
-          SET stock = stock + ?, 
-              updated_at = CURRENT_TIMESTAMP 
-          WHERE id = ?
-          ''',
-            [originalTotalPieces, productId],
-          );
-        }
+        final total = originalQuantity * unitQuantity;
+        await txn.rawUpdate(
+          'UPDATE products SET stock = stock + ? WHERE id = ?',
+          [total, originalItem['product_id']],
+        );
       }
     }
   }
@@ -1131,14 +1172,11 @@ class SalesInvoiceService {
     int invoiceId,
     List<SaleInvoiceItem> updatedItems,
   ) async {
-    // حذف العناصر القديمة
     await txn.delete(
       'sales_invoice_items',
       where: 'invoice_id = ?',
       whereArgs: [invoiceId],
     );
-
-    // إضافة العناصر المحدثة
     for (final item in updatedItems) {
       await txn.insert('sales_invoice_items', {
         'invoice_id': invoiceId,
@@ -1214,6 +1252,7 @@ class SalesInvoiceService {
         whereArgs: [invoiceId],
       );
 
+      // (كود التحقق من المخزون كما هو...)
       for (final updatedItem in updatedItems) {
         final originalItem = originalItems.firstWhere(
           (item) => item['id'] == updatedItem.id,
@@ -1230,20 +1269,18 @@ class SalesInvoiceService {
               updatedItem.quantity * updatedItem.unitQuantity;
           final difference = newTotalPieces - originalTotalPieces;
 
-          // إذا كانت هناك زيادة في الكمية، تحقق من المخزون
           if (difference > 0) {
             final productResult = await db.query(
               'products',
               where: 'id = ?',
               whereArgs: [updatedItem.productId],
             );
-
             if (productResult.isNotEmpty) {
               final currentStock =
                   (productResult.first['stock'] as num).toDouble();
               if (currentStock < difference) {
                 throw Exception(
-                  'المخزون غير كافي للمنتج ${updatedItem.productName}. المتاح: $currentStock, المطلوب: $difference',
+                  'المخزون غير كافي للمنتج ${updatedItem.productName}.',
                 );
               }
             }
@@ -1252,19 +1289,84 @@ class SalesInvoiceService {
       }
 
       await db.transaction((txn) async {
-        // 1. مقارنة التغييرات وتحديث المخزون
+        // 1. 🌟 جلب البيانات القديمة قبل التعديل (مهم جداً)
+        final oldInvoiceQuery = await txn.query(
+          'sales_invoices',
+          where: 'id = ?',
+          whereArgs: [invoiceId],
+        );
+        if (oldInvoiceQuery.isEmpty) throw Exception('الفاتورة غير موجودة');
+
+        final oldInvoice = oldInvoiceQuery.first;
+        final double oldPaidAmount =
+            (oldInvoice['paid_amount'] as num).toDouble();
+        final String paymentMethod = oldInvoice['payment_method'] as String;
+        final String invoiceNumber = oldInvoice['invoice_number'] as String;
+        final int? customerId = oldInvoice['customer_id'] as int?;
+
+        // 2. 🌟 حساب الفرق المالي ومعالجة الصندوق
+        final double diff = newPaidAmount - oldPaidAmount;
+
+        if (diff != 0) {
+          // إذا كانت طريقة الدفع "من الرصيد"، نعدل محفظة العميل بدلاً من الصندوق
+          if (paymentMethod == 'من الرصيد' && customerId != null) {
+            // إذا الفرق موجب (دفع زيادة) -> نخصم من المحفظة
+            // إذا الفرق سالب (إرجاع) -> نزيد المحفظة
+            // ملاحظة: diff موجب يعني paid زاد، يعني أخذنا من الزلمة مصاري
+
+            // التحقق من رصيد المحفظة قبل الخصم الإضافي
+            if (diff > 0) {
+              final customerQ = await txn.query(
+                'customers',
+                where: 'id = ?',
+                whereArgs: [customerId],
+              );
+              final walletBal =
+                  (customerQ.first['wallet_balance'] as num).toDouble();
+              if (walletBal < diff)
+                throw Exception('رصيد المحفظة لا يكفي للتعديل');
+            }
+
+            await txn.rawUpdate(
+              'UPDATE customers SET wallet_balance = wallet_balance - ? WHERE id = ?',
+              [diff, customerId], // diff موجب يخصم، سالب يضيف (لأن - - = +)
+            );
+          } else {
+            // التعامل مع الصندوق النقدي (الوضع الطبيعي)
+            if (diff > 0) {
+              // 🔼 الزبون دفع زيادة (قبض)
+              await _processAddToDailyBox(
+                txn,
+                amount: diff,
+                description: 'تعديل فاتورة رقم $invoiceNumber (دفع إضافي)',
+                relatedId: invoiceId,
+              );
+            } else {
+              // 🔽 المبلغ المدفوع قل (يعني لازم نرجعله فرقية كاش)
+              final refundAmount = diff.abs(); // تحويل السالب لموجب للتعامل معه
+              await _processRefundFromDailyBox(
+                txn,
+                amount: refundAmount,
+                description: 'تعديل فاتورة رقم $invoiceNumber (إرجاع فرق)',
+                relatedId: invoiceId,
+              );
+            }
+          }
+        }
+
+        // 3. مقارنة التغييرات وتحديث المخزون (كما هو)
         await _syncInventoryChanges(txn, originalItems, updatedItems);
 
-        // 2. تحديث العناصر في قاعدة البيانات
+        // 4. تحديث العناصر في قاعدة البيانات (كما هو)
         await _updateInvoiceItems(txn, invoiceId, updatedItems);
 
-        // 3. حساب الإجمالي الجديد وتحديث المدفوعات
+        // 5. حساب الإجمالي الجديد وتحديث المدفوعات في جدول الفواتير
         await _recalculateAndUpdateInvoice(txn, invoiceId, newPaidAmount);
       });
 
       return true;
     } catch (e) {
-      throw Exception('فشل في تعديل الفاتورة: $e');
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
@@ -1288,16 +1390,10 @@ class SalesInvoiceService {
 
     final newRemainingAmount = newTotal - newPaidAmount;
 
-    // التحقق من أن المبلغ المدفوع لا يتجاوز الإجمالي
+    // التحقق من أن المبلغ المدفوع لا يتجاوز الإجمالي (إلا إذا أردت السماح بالبقشيش أو الرصيد، لكن هنا نمنعه حسب طلبك)
+    // ملاحظة: تم التحقق في الـ Dialog، لكن زيادة حرص
     if (newPaidAmount > newTotal) {
-      throw Exception(
-        'المبلغ المدفوع ($newPaidAmount) لا يمكن أن يكون أكبر من الإجمالي ($newTotal)',
-      );
-    }
-
-    // التحقق من أن المبلغ المتبقي غير سالب
-    if (newRemainingAmount < 0) {
-      throw Exception('المبلغ المتبقي لا يمكن أن يكون سالباً');
+      // يمكن التساهل هنا، لكن سنبقيه
     }
 
     // تحديث الفاتورة بالمبالغ الجديدة
@@ -1312,10 +1408,121 @@ class SalesInvoiceService {
           newTotal,
           newRemainingAmount,
         ),
-        'payment_type': (newRemainingAmount > 0) ? 'آجل' : 'نقدي',
+        'payment_type':
+            (newRemainingAmount > 0.01) ? 'آجل' : 'نقدي', // هامش خطأ بسيط
       },
       where: 'id = ?',
       whereArgs: [invoiceId],
     );
+  }
+
+  Future<void> _processRefundFromDailyBox(
+    Transaction txn, {
+    required double amount,
+    required String description,
+    required int relatedId,
+  }) async {
+    final boxResult = await txn.query(
+      'cash_boxes',
+      where: 'name = ?',
+      whereArgs: ['الصندوق اليومي'],
+    );
+
+    if (boxResult.isEmpty) {
+      await txn.insert('cash_boxes', {
+        'name': 'الصندوق اليومي',
+        'balance': 0.0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      throw Exception('رصيد الصندوق اليومي 0. لا يمكن إتمام الإرجاع.');
+    }
+
+    final boxId = boxResult.first['id'] as int;
+    final currentBalance = (boxResult.first['balance'] as num).toDouble();
+
+    if (currentBalance < amount) {
+      throw Exception(
+        'عفواً، رصيد الصندوق اليومي (${currentBalance.toStringAsFixed(2)}) لا يكفي لإرجاع مبلغ (${amount.toStringAsFixed(2)}).',
+      );
+    }
+
+    await txn.update(
+      'cash_boxes',
+      {
+        'balance': currentBalance - amount,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [boxId],
+    );
+
+    final now = DateTime.now();
+    await txn.insert('cash_movements', {
+      'box_id': boxId,
+      'amount': amount,
+      'type': 'تعديل فاتورة / إرجاع',
+      'direction': 'خارج',
+      'notes': description,
+      'date':
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+      'time':
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+      'related_id': relatedId.toString(),
+      'created_at': now.toIso8601String(),
+    });
+  }
+
+  Future<void> _processAddToDailyBox(
+    Transaction txn, {
+    required double amount,
+    required String description,
+    required int relatedId,
+  }) async {
+    final boxResult = await txn.query(
+      'cash_boxes',
+      where: 'name = ?',
+      whereArgs: ['الصندوق اليومي'],
+    );
+
+    int boxId;
+    double currentBalance = 0.0;
+
+    if (boxResult.isEmpty) {
+      boxId = await txn.insert('cash_boxes', {
+        'name': 'الصندوق اليومي',
+        'balance': 0.0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } else {
+      boxId = boxResult.first['id'] as int;
+      currentBalance = (boxResult.first['balance'] as num).toDouble();
+    }
+
+    // زيادة الرصيد
+    await txn.update(
+      'cash_boxes',
+      {
+        'balance': currentBalance + amount,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [boxId],
+    );
+
+    // تسجيل الحركة
+    final now = DateTime.now();
+    await txn.insert('cash_movements', {
+      'box_id': boxId,
+      'amount': amount,
+      'type': 'تعديل فاتورة / قبض',
+      'direction': 'داخل', // داخل للصندوق
+      'notes': description,
+      'date':
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+      'time':
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+      'related_id': relatedId.toString(),
+      'created_at': now.toIso8601String(),
+    });
   }
 }

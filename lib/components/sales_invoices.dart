@@ -481,35 +481,36 @@ class _SalesInvoicesState extends State<SalesInvoices> {
         Row(
           children: [
             _buildStatItem(
-              'إجمالي الفواتير',
+              'إجمالي الفواتير (الكل)',
               '${_statistics['totalInvoices'] ?? 0}',
               Icons.receipt,
               Colors.blue,
             ),
             const SizedBox(width: 16),
             _buildStatItem(
-              'إجمالي المبيعات',
-              '${(_statistics['totalSales'] ?? 0.0).toStringAsFixed(2)} شيكل',
-              Icons.attach_money,
-              Colors.green,
+              'إجمالي المبيعات (الكل)',
+              '${(_statistics['totalSales'] ?? 0.0).toStringAsFixed(0)} شيكل',
+              Icons.bar_chart, // تغيير الأيقونة لتمييزها
+              Colors.blueGrey,
             ),
           ],
         ),
         const SizedBox(height: 8),
         Row(
           children: [
-            // ✅ **تغيير متوسط الفاتورة إلى صافي ربح اليوم**
+            // ✅ الربح الحقيقي المطابق للتقارير
             _buildStatItem(
-              'صافي ربح اليوم', // ✅ العنوان الجديد
-              '${(_statistics['todayNetProfit'] ?? 0.0).toStringAsFixed(2)} شيكل', // ✅ استخدام todayNetProfit
-              Icons.trending_up, // ✅ أيقونة مختلفة
-              Colors.orange,
+              'ربح اليوم المحقق',
+              '${(_statistics['todayRealizedProfit'] ?? 0.0).toStringAsFixed(2)} شيكل',
+              Icons.trending_up,
+              Colors.green,
             ),
             const SizedBox(width: 16),
+            // ✅ التحصيلات المطابقة للتقارير (كاش + سداد ديون)
             _buildStatItem(
-              'مبيعات اليوم',
-              '${(_statistics['todaySales'] ?? 0.0).toStringAsFixed(2)} شيكل',
-              Icons.today,
+              'مقبوضات اليوم (الكاش)', // غيّرنا الاسم ليكون دقيق
+              '${(_statistics['todayCollected'] ?? 0.0).toStringAsFixed(2)} شيكل', // استخدام المفتاح الجديد
+              Icons.attach_money,
               Colors.purple,
             ),
           ],

@@ -29,7 +29,9 @@ class ProductQueries {
   }) async {
     final db = await dbHelper.database;
 
-    final conditions = <String>['p.is_active = 1'];
+    final conditions = <String>[
+      'p.is_active = 1',
+    ]; // تأكدنا من حساب المنتجات النشطة فقط
     final args = <Object>[];
 
     if (searchTerm != null && searchTerm.isNotEmpty) {
@@ -49,7 +51,6 @@ class ProductQueries {
       args.add(categoryId);
     }
 
-    // إضافة فلتر المخزون
     if (stockFilter != null) {
       switch (stockFilter) {
         case 'out':
@@ -66,15 +67,21 @@ class ProductQueries {
 
     final whereClause = conditions.join(' AND ');
 
-    // استعلام لحساب إجمالي سعر الشراء
+    // التعديل الجوهري هنا:
+    // نستخدم استعلام فرعي مع GROUP BY لضمان عدم تكرار المنتج بسبب الـ JOIN مع جدول الباركود
     final result = await db.rawQuery('''
-    SELECT 
-      SUM(p.purchase_price * p.stock) as total_purchase
-    FROM products p 
-    LEFT JOIN categories c ON p.category_id = c.id 
-    LEFT JOIN product_barcodes pb ON pb.product_id = p.id
-    WHERE $whereClause
-  ''', args);
+      SELECT SUM(sub.item_total) as total_purchase
+      FROM (
+        SELECT (p.purchase_price * p.stock) as item_total
+        FROM products p 
+        LEFT JOIN categories c ON p.category_id = c.id 
+        LEFT JOIN product_barcodes pb ON pb.product_id = p.id
+        WHERE $whereClause
+        GROUP BY p.id 
+      ) as sub
+    ''', args);
+
+    // ملاحظة: GROUP BY p.id تضمن أنه حتى لو ارتبط المنتج بـ 10 باركودات، سيتم إرجاع سطر واحد فقط للمنتج
 
     final total = result.first['total_purchase'];
     return total is double ? total : (total as num?)?.toDouble() ?? 0.0;

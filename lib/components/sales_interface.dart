@@ -49,7 +49,15 @@ class _SalesInterfaceState extends State<SalesInterface>
   bool _isLoadingMore = false;
   String _searchTerm = "";
   int? _selectedCategoryId;
-  int _refreshKey = 0; // مفتاح لتجربة إعادة بناء الحقول عند حدوث خطأ في السعر
+  int _refreshKey = 0;
+
+  // --- 1. متغيرات الباركود الجديدة (تمت إضافتها) ---
+  final TextEditingController _barcodeController = TextEditingController();
+  final FocusNode _barcodeFocusNode = FocusNode();
+
+  // مفتاح عالمي للوصول لحالة السلة (F3 للتنقل)
+  final GlobalKey<ShoppingCartState> _shoppingCartKey =
+      GlobalKey<ShoppingCartState>();
 
   @override
   bool get wantKeepAlive => true;
@@ -58,6 +66,14 @@ class _SalesInterfaceState extends State<SalesInterface>
   void initState() {
     super.initState();
     _refreshData();
+  }
+
+  @override
+  void dispose() {
+    // تنظيف الذاكرة
+    _barcodeController.dispose();
+    _barcodeFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _refreshData() async {
@@ -72,8 +88,6 @@ class _SalesInterfaceState extends State<SalesInterface>
       if (!mounted) return;
 
       setState(() {
-        // النتيجة الأولى هي void لأن _loadProducts تحدث الـ State داخلياً
-        // لذا نأخذ الفئات والعملاء من النتائج التالية
         _categories = results[1] as List<Category>;
         _customers = results[2] as List<Customer>;
         _isLoading = false;
@@ -89,12 +103,54 @@ class _SalesInterfaceState extends State<SalesInterface>
     }
   }
 
-  // --- دوال البحث والفلترة ---
   final GlobalKey<ProductsTableState> _productsTableKey =
       GlobalKey<ProductsTableState>();
 
   void _focusSearch() {
     _productsTableKey.currentState?.focusSearch();
+  }
+
+  // --- 2. دالة معالجة الباركود (تمت إضافتها) ---
+  Future<void> _onBarcodeScanned(String barcode) async {
+    if (barcode.trim().isEmpty) return;
+
+    final cleanBarcode = barcode.trim();
+
+    try {
+      // 1. استخدام دالة الاستعلام المباشر من قاعدة البيانات لضمان الدقة
+      // هذه الدالة يفترض أنها تبحث في الباركود الرئيسي والبديل
+      Product? foundProduct = await _productQueries.getProductByBarcode(
+        cleanBarcode,
+      );
+
+      if (foundProduct != null) {
+        // 2. إذا وجدنا المنتج، يجب جلب الوحدات/الحزم الخاصة به إذا لم تكن محملة
+        // لأن getProductByBarcode قد ترجع المنتج الأساسي فقط
+        if (foundProduct.id != null) {
+          foundProduct.packages = await _productQueries.getPackagesForProduct(
+            foundProduct.id!,
+          );
+        }
+
+        // 3. إضافته للسلة
+        _addToCart(foundProduct);
+
+        // 4. مسح الحقل للعملية التالية
+        _barcodeController.clear();
+      } else {
+        // إذا لم يتم العثور عليه
+        TopAlert.showError(
+          context: context,
+          message: 'المنتج غير موجود: $cleanBarcode',
+        );
+        _barcodeController.clear();
+      }
+    } catch (e) {
+      TopAlert.showError(context: context, message: 'حدث خطأ أثناء البحث: $e');
+    }
+
+    // إعادة التركيز دائماً
+    _barcodeFocusNode.requestFocus();
   }
 
   Future<void> _loadProducts({bool reset = true}) async {
@@ -113,7 +169,6 @@ class _SalesInterfaceState extends State<SalesInterface>
         categoryId: _selectedCategoryId,
       );
 
-      // تحميل الحزم للمنتجات
       for (var product in products) {
         if (product.id != null) {
           product.packages = await _productQueries.getPackagesForProduct(
@@ -128,7 +183,6 @@ class _SalesInterfaceState extends State<SalesInterface>
         if (reset) {
           _products = products;
         } else {
-          // دمج القوائم مع التحقق من عدم التكرار
           final existingIds = _products.map((p) => p.id).toSet();
           for (var newProduct in products) {
             if (!existingIds.contains(newProduct.id)) {
@@ -156,46 +210,6 @@ class _SalesInterfaceState extends State<SalesInterface>
     await _loadProducts(reset: false);
   }
 
-  // void _onSearch(String searchTerm) {
-  //   setState(() {
-  //     _searchTerm = searchTerm;
-  //   });
-  //   _loadProducts(reset: true);
-  // }
-
-  // void _onCategorySelected(int? categoryId) {
-  //   setState(() {
-  //     _selectedCategoryId = categoryId;
-  //     // يمكنك تصفير البحث هنا إذا أردت أن يكون الفلتر منفصلاً
-  //     // _searchTerm = "";
-  //   });
-  //   _loadProducts(reset: true);
-  // }
-
-  // void _clearFilters() {
-  //   setState(() {
-  //     _searchTerm = "";
-  //     _selectedCategoryId = null;
-  //   });
-  //   _loadProducts(reset: true);
-  // }
-
-  // --- دوال السلة والباركود ---
-
-  // void _handleProductFromBarcode(Product product) {
-  //   if (product.id == null) return;
-
-  //   // إضافة المنتج للقائمة المعروضة إذا لم يكن موجوداً (لتحسين تجربة المستخدم)
-  //   final existsInList = _products.any((p) => p.id == product.id);
-  //   if (!existsInList) {
-  //     setState(() {
-  //       _products.insert(0, product);
-  //     });
-  //   }
-
-  //   _addToCart(product);
-  // }
-
   void _addToCart(Product product) {
     if (product.stock <= 0) {
       TopAlert.showError(
@@ -212,7 +226,16 @@ class _SalesInterfaceState extends State<SalesInterface>
 
       if (existingItemIndex != -1) {
         final existingItem = _cartItems[existingItemIndex];
-        final newQuantity = existingItem.quantity + 1;
+        final currentUsedStock =
+            existingItem.quantity * existingItem.unitQuantity;
+        final remainingStock = product.stock - currentUsedStock;
+
+        double quantityToAdd = 1.0;
+        if (remainingStock < 1.0 && remainingStock > 0) {
+          quantityToAdd = remainingStock;
+        }
+
+        final newQuantity = existingItem.quantity + quantityToAdd;
 
         if (!_checkStockAvailability(
           product,
@@ -227,7 +250,12 @@ class _SalesInterfaceState extends State<SalesInterface>
         }
         existingItem.quantity = newQuantity;
       } else {
-        if (!_checkStockAvailability(product, 1.0, 1.0)) {
+        double initialQuantity = 1.0;
+        if (product.stock < 1.0 && product.stock > 0) {
+          initialQuantity = product.stock;
+        }
+
+        if (!_checkStockAvailability(product, initialQuantity, 1.0)) {
           TopAlert.showError(
             context: context,
             message: 'الكمية المطلوبة تتجاوز المخزون المتاح',
@@ -250,7 +278,7 @@ class _SalesInterfaceState extends State<SalesInterface>
             id: product.id!,
             name: product.name,
             price: product.price,
-            quantity: 1.0,
+            quantity: initialQuantity,
             stock: product.stock,
             purchasePrice: product.purchasePrice,
             unitName: 'حبة',
@@ -259,23 +287,28 @@ class _SalesInterfaceState extends State<SalesInterface>
           ),
         );
       }
-      _customTotal = null; // إعادة تعيين الإجمالي المخصص عند إضافة منتج جديد
+      _customTotal = null;
+    });
+
+    // إعادة التركيز للباركود بعد الإضافة
+    // نستخدم addPostFrameCallback لضمان أن الواجهة قد انتهت من إعادة البناء
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_barcodeFocusNode.canRequestFocus) {
+        _barcodeFocusNode.requestFocus();
+      }
     });
   }
 
-  // دالة مساعدة للحصول على المنتج بأمان (سواء من القائمة أو من السلة كاحتياط)
   Product _SafeGetProduct(CartItem item) {
     try {
       return _products.firstWhere((p) => p.id == item.id);
     } catch (e) {
-      // إذا لم يكن المنتج في القائمة الحالية (بسبب الفلترة مثلاً)، ننشئ كائناً من بيانات السلة
       return Product(
         id: item.id,
         name: item.name,
         price: item.price,
         purchasePrice: item.purchasePrice,
-        stock: item.stock, // نعتمد على المخزون المسجل لحظة الإضافة
-        // يمكن هنا إضافة استعلام قاعدة بيانات للحصول على المخزون المحدث إذا لزم الأمر
+        stock: item.stock,
       );
     }
   }
@@ -300,7 +333,7 @@ class _SalesInterfaceState extends State<SalesInterface>
       );
       if (itemIndex != -1) {
         final item = _cartItems[itemIndex];
-        final product = _SafeGetProduct(item); // استخدام الدالة الآمنة
+        final product = _SafeGetProduct(item);
 
         double newQuantity;
         if (resetQuantity) {
@@ -327,7 +360,7 @@ class _SalesInterfaceState extends State<SalesInterface>
         item.price = newPackage.price;
         item.unitQuantity = newPackage.containedQuantity;
         item.quantity = newQuantity;
-        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تغيير الوحدة
+        _customTotal = null;
       }
     });
   }
@@ -344,7 +377,7 @@ class _SalesInterfaceState extends State<SalesInterface>
       );
       if (itemIndex != -1) {
         final item = _cartItems[itemIndex];
-        final product = _SafeGetProduct(item); // استخدام الدالة الآمنة
+        final product = _SafeGetProduct(item);
 
         final totalPieces = newQuantity * item.unitQuantity;
         if (totalPieces > product.stock) {
@@ -355,7 +388,7 @@ class _SalesInterfaceState extends State<SalesInterface>
           return;
         }
         item.quantity = newQuantity;
-        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تغيير الكمية
+        _customTotal = null;
       }
     });
   }
@@ -363,7 +396,7 @@ class _SalesInterfaceState extends State<SalesInterface>
   void _removeFromCart(String cartItemId) {
     setState(() {
       _cartItems.removeWhere((item) => item.cartItemId == cartItemId);
-      _customTotal = null; // إعادة تعيين الإجمالي المخصص عند الحذف
+      _customTotal = null;
     });
   }
 
@@ -374,11 +407,10 @@ class _SalesInterfaceState extends State<SalesInterface>
       );
       if (itemIndex != -1) {
         final item = _cartItems[itemIndex];
-        // حساب سعر الشراء للوحدة المختارة
         final minAllowedPrice = item.purchasePrice * item.unitQuantity;
 
         if (newPrice < minAllowedPrice) {
-          _refreshKey++; // زيادة المفتاح لإجبار الحقول على إعادة البناء والعودة للسعر الأصلي
+          _refreshKey++;
           TopAlert.showError(
             context: context,
             message:
@@ -388,14 +420,13 @@ class _SalesInterfaceState extends State<SalesInterface>
         }
 
         item.price = newPrice;
-        _customTotal = null; // إعادة تعيين الإجمالي المخصص عند تعديل سعر منتج
+        _customTotal = null;
       }
     });
   }
 
   void _updateCustomTotal(double newTotal) {
     setState(() {
-      // التحقق من أن الإجمالي الجديد لا يقل عن إجمالي سعر الشراء لكل العناصر
       final totalPurchaseCost = _cartItems.fold(
         0.0,
         (sum, item) =>
@@ -403,7 +434,7 @@ class _SalesInterfaceState extends State<SalesInterface>
       );
 
       if (newTotal < totalPurchaseCost) {
-        _refreshKey++; // زيادة المفتاح لإجبار الحقول على إعادة البناء والعودة للإجمالي الأصلي
+        _refreshKey++;
         TopAlert.showError(
           context: context,
           message:
@@ -417,7 +448,7 @@ class _SalesInterfaceState extends State<SalesInterface>
 
   bool _validateStockBeforeCheckout() {
     for (final cartItem in _cartItems) {
-      final product = _SafeGetProduct(cartItem); // استخدام الدالة الآمنة
+      final product = _SafeGetProduct(cartItem);
 
       final totalPieces = cartItem.quantity * cartItem.unitQuantity;
       if (totalPieces > product.stock) {
@@ -440,7 +471,6 @@ class _SalesInterfaceState extends State<SalesInterface>
     if (!_validateStockBeforeCheckout()) return;
 
     try {
-      // تحديث قائمة العملاء (اختياري)
       final updatedCustomers = await _customerQueries.getAllCustomers();
       if (mounted) setState(() => _customers = updatedCustomers);
     } catch (_) {}
@@ -506,7 +536,6 @@ class _SalesInterfaceState extends State<SalesInterface>
         originalTotal: totalBeforeAdjustment,
       );
 
-      // تسجيل الدفع في الصندوق اليومي إذا كان هناك مبلغ مدفوع
       if (paidAmount > 0) {
         await _cashService.recordSaleIncome(
           amount: paidAmount,
@@ -519,7 +548,6 @@ class _SalesInterfaceState extends State<SalesInterface>
         message: 'تم البيع بنجاح - ${invoice.invoiceNumber}',
       );
 
-      // إعادة تحميل البيانات وتفريغ السلة
       await _refreshData();
       setState(() => _cartItems.clear());
     } catch (e) {
@@ -536,75 +564,100 @@ class _SalesInterfaceState extends State<SalesInterface>
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
-      body: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.f1): _focusSearch,
-          const SingleActivator(LogicalKeyboardKey.space): () {
-            // تنفيذ البيع بالمسافة فقط إذا لم يكن هناك تركيز على حقل نصي
-            if (FocusManager.instance.primaryFocus?.context?.widget
-                is! EditableText) {
-              if (_cartItems.isNotEmpty && !_isProcessingSale) {
-                _handleCheckout();
-              }
-            }
-          },
+      body: GestureDetector(
+        onTap: () {
+          // عند النقر في أي مكان فارغ، نعيد التركيز لحقل الباركود
+          // إلا إذا كان المستخدم ينقر على حقل نصي آخر (هذا يتم التعامل معه تلقائياً بواسطة فلاتر)
+          // ولكن هنا نريد التأكد من عدم ضياع التركيز
+          if (_barcodeFocusNode.canRequestFocus) {
+            _barcodeFocusNode.requestFocus();
+          }
         },
-        child: FocusTraversalGroup(
-          policy: OrderedTraversalPolicy(),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 1. قسم المنتجات (صار أصغر - الثلث تقريباً)
-              Expanded(
-                flex: 4,
-                child: ProductsTable(
-                  key: _productsTableKey,
-                  products: _products,
-                  categories: _categories,
-                  onProductAdded: _addToCart,
-                  hasMore: _hasMore,
-                  isLoadingMore: _isLoadingMore,
-                  onLoadMore: _loadMoreProducts,
-                  onSearch: (val) {
-                    setState(() => _searchTerm = val);
-                    _loadProducts(reset: true);
-                  },
-                  onCategorySelected: (val) {
-                    setState(() => _selectedCategoryId = val);
-                    _loadProducts(reset: true);
-                  },
-                  selectedCategoryId: _selectedCategoryId,
-                  searchTerm: _searchTerm,
-                  onClearFilters: () {
-                    setState(() {
-                      _searchTerm = "";
-                      _selectedCategoryId = null;
-                    });
-                    _loadProducts(reset: true);
-                  },
+        behavior:
+            HitTestBehavior
+                .translucent, // للسماح بالتقاط النقرات في الأماكن الفارغة
+        child: CallbackShortcuts(
+          bindings: {
+            // F1: للبحث الرئيسي (باركود)
+            const SingleActivator(LogicalKeyboardKey.f1):
+                () => _barcodeFocusNode.requestFocus(),
+            // F2: للبحث بالاسم (المنتجات)
+            const SingleActivator(LogicalKeyboardKey.f2): _focusSearch,
+            // F3: للتنقل بين كميات السلة
+            const SingleActivator(LogicalKeyboardKey.f3): () {
+              _shoppingCartKey.currentState?.focusNextQuantity();
+            },
+            const SingleActivator(LogicalKeyboardKey.space): () {
+              if (FocusManager.instance.primaryFocus?.context?.widget
+                  is! EditableText) {
+                if (_cartItems.isNotEmpty && !_isProcessingSale) {
+                  _handleCheckout();
+                }
+              }
+            },
+          },
+          child: FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 1. قسم المنتجات
+                Expanded(
+                  flex: 4,
+                  child: ProductsTable(
+                    key: _productsTableKey,
+                    products: _products,
+                    categories: _categories,
+                    onProductAdded: _addToCart,
+                    hasMore: _hasMore,
+                    isLoadingMore: _isLoadingMore,
+                    onLoadMore: _loadMoreProducts,
+                    onSearch: (val) {
+                      setState(() => _searchTerm = val);
+                      _loadProducts(reset: true);
+                    },
+                    onCategorySelected: (val) {
+                      setState(() => _selectedCategoryId = val);
+                      _loadProducts(reset: true);
+                    },
+                    selectedCategoryId: _selectedCategoryId,
+                    searchTerm: _searchTerm,
+                    onClearFilters: () {
+                      setState(() {
+                        _searchTerm = "";
+                        _selectedCategoryId = null;
+                      });
+                      _loadProducts(reset: true);
+                    },
+                  ),
                 ),
-              ),
 
-              const SizedBox(width: 16),
+                const SizedBox(width: 16),
 
-              // 2. قسم السلة (صار أكبر - الثلثين تقريباً)
-              Expanded(
-                flex: 8, // نسبة 8 من 12 (حوالي 66%)
-                child: ShoppingCart(
-                  cartItems: _cartItems,
-                  products: _products,
-                  onQuantityUpdated: _updateCartItemQuantity,
-                  onPriceUpdated: _updateCartItemPrice,
-                  onUnitChanged: _updateCartItemUnit,
-                  onItemRemoved: _removeFromCart,
-                  onCheckout: _handleCheckout,
-                  onTotalUpdated: _updateCustomTotal,
-                  customTotal: _customTotal,
-                  isLoading: _isProcessingSale,
-                  refreshKey: _refreshKey,
+                // 2. قسم السلة (تم تحديثه لإصلاح الخطأ)
+                Expanded(
+                  flex: 8,
+                  child: ShoppingCart(
+                    cartKey: _shoppingCartKey, // تمرير المفتاح
+                    cartItems: _cartItems,
+                    products: _products,
+                    onQuantityUpdated: _updateCartItemQuantity,
+                    onPriceUpdated: _updateCartItemPrice,
+                    onUnitChanged: _updateCartItemUnit,
+                    onItemRemoved: _removeFromCart,
+                    onCheckout: _handleCheckout,
+                    onTotalUpdated: _updateCustomTotal,
+                    customTotal: _customTotal,
+                    isLoading: _isProcessingSale,
+                    refreshKey: _refreshKey,
+                    // --- المعاملات المضافة حديثاً ---
+                    barcodeController: _barcodeController,
+                    barcodeFocusNode: _barcodeFocusNode,
+                    onBarcodeSubmit: _onBarcodeScanned,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

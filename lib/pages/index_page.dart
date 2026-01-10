@@ -3,7 +3,7 @@ import 'package:pos_desktop/components/multi_tab_sales_page.dart';
 import '../components/product_management_page.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
-import '../components/reports_section.dart';
+import '../components/reports/new_reports_page.dart';
 import '../components/customers_and_suppliers_page.dart';
 import '../components/cash_management_page.dart';
 
@@ -23,7 +23,7 @@ class _IndexPageState extends State<IndexPage> {
     const MultiTabSalesPage(), // <-- التغيير صار هنا بدل SalesInterface()
     const SalesInvoices(),
     const PurchaseInvoices(),
-    const ReportsSection(),
+    const NewReportsPage(),
     const CustomersAndSuppliersPage(), // <-- Modified
     const CashManagementPage(), // <-- New Page (7th)
   ];
