@@ -43,6 +43,7 @@ dependencies:
   path_provider: ^2.1.5
   dropdown_search: ^6.0.2
   focus_detector: ^2.0.0
+  cron: ^0.4.0
 
 
 dev_dependencies:

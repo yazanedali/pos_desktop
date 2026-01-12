@@ -330,8 +330,6 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                               onCategoriesUpdate: _loadData,
                             ),
                             const SizedBox(height: 20),
-                            _buildSearchCard(),
-                            const SizedBox(height: 20),
                           ],
                         ),
                       ),
@@ -353,6 +351,9 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                             const SizedBox(height: 16),
                             // فلتر المخزون تحت فلتر الفئة
                             _buildStockFilterSection(),
+                            const SizedBox(height: 16),
+                            _buildSearchCard(),
+                            const SizedBox(height: 20),
                           ],
                         ),
                       ),

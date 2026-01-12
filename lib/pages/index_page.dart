@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/components/multi_tab_sales_page.dart';
+import 'package:pos_desktop/database/backup_service.dart';
+import 'package:pos_desktop/widgets/top_alert.dart';
 import '../components/product_management_page.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
@@ -15,31 +17,28 @@ class IndexPage extends StatefulWidget {
 }
 
 class _IndexPageState extends State<IndexPage> {
-  int _selectedIndex = 1; // تبدأ الواجهة من نقطة البيع
+  int _selectedIndex = 1;
 
-  // الخطوة 2: إضافة الصفحة الجديدة إلى قائمة الصفحات
   final List<Widget> _pages = [
     const ProductManagementPage(),
-    const MultiTabSalesPage(), // <-- التغيير صار هنا بدل SalesInterface()
+    const MultiTabSalesPage(),
     const SalesInvoices(),
     const PurchaseInvoices(),
     const NewReportsPage(),
-    const CustomersAndSuppliersPage(), // <-- Modified
-    const CashManagementPage(), // <-- New Page (7th)
+    const CustomersAndSuppliersPage(),
+    const CashManagementPage(),
   ];
 
-  // الخطوة 3: إضافة عنوان الصفحة الجديدة
   final List<String> _pageTitles = [
     'المنتجات',
     'نقطة البيع',
     'فواتير المبيعات',
     'فواتير الشراء',
     'التقارير',
-    'العملاء والموردين', // <-- Modified
-    'الصندوق', // <-- New Title
+    'العملاء والموردين',
+    'الصندوق',
   ];
 
-  // الخطوة 4: إضافة أيقونة الصفحة الجديدة
   final List<IconData> _pageIcons = [
     Icons.inventory_2_outlined,
     Icons.shopping_cart_checkout,
@@ -50,6 +49,36 @@ class _IndexPageState extends State<IndexPage> {
     Icons.account_balance_wallet_outlined,
   ];
 
+  // 2. دالة تنفيذ النسخ الاحتياطي
+  // 2. دالة تنفيذ النسخ الاحتياطي باستخدام TopAlert
+  Future<void> _performBackup() async {
+    // إظهار دائرة تحميل (يمكنك أيضاً استبدالها بـ TopAlert إذا أردت)
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final backupService = BackupService();
+    String result = await backupService.createBackup(isAuto: false);
+
+    if (!mounted) return;
+
+    // إغلاق دائرة التحميل
+    Navigator.pop(context);
+
+    // التحقق من النتيجة لعرض التنبيه المناسب
+    if (result.contains("نجاح")) {
+      TopAlert.showSuccess(context: context, message: result);
+    } else if (result.contains("فقط")) {
+      // حالة النجاح الجزئي (محلياً فقط)
+      TopAlert.showWarning(context: context, message: result);
+    } else {
+      // حالة الفشل الكامل
+      TopAlert.showError(context: context, message: result);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,12 +86,11 @@ class _IndexPageState extends State<IndexPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // _buildHeader(),
+            // _buildHeader(), // الهيدر القديم معطل كما طلبت
             _buildCustomNavigationBar(),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                // عرض الصفحة المحددة
                 child: _pages[_selectedIndex],
               ),
             ),
@@ -72,92 +100,7 @@ class _IndexPageState extends State<IndexPage> {
     );
   }
 
-  // Widget _buildHeader() {
-  //   return Container(
-  //     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-  //     decoration: BoxDecoration(
-  //       color: Colors.white,
-  //       border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-  //     ),
-  //     child: Row(
-  //       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  //       children: [
-  //         // --- الجزء الأيسر: حالة المتجر ---
-  //         Row(
-  //           children: [
-  //             _buildStatusChip("متصل", Colors.green[100]!, Colors.green[800]!),
-  //             const SizedBox(width: 12),
-  //             _buildStatusChip(
-  //               "المتجر الرئيسي",
-  //               Colors.grey[200]!,
-  //               Colors.grey[800]!,
-  //             ),
-  //           ],
-  //         ),
-  //         // --- الجزء الأيمن: شعار واسم النظام ---
-  //         Row(
-  //           children: [
-  //             Column(
-  //               crossAxisAlignment: CrossAxisAlignment.end,
-  //               children: [
-  //                 const Text(
-  //                   "نظام نقطة البيع",
-  //                   style: TextStyle(
-  //                     fontSize: 18,
-  //                     fontWeight: FontWeight.bold,
-  //                     color: Color(0xFF1A2B4D),
-  //                   ),
-  //                 ),
-  //                 Text(
-  //                   "إدارة ذكية للمبيعات والمخزون",
-  //                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-  //                 ),
-  //               ],
-  //             ),
-  //             const SizedBox(width: 16),
-  //             Container(
-  //               padding: const EdgeInsets.all(10),
-  //               decoration: BoxDecoration(
-  //                 borderRadius: BorderRadius.circular(10),
-  //                 gradient: const LinearGradient(
-  //                   colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
-  //                   begin: Alignment.topLeft,
-  //                   end: Alignment.bottomRight,
-  //                 ),
-  //               ),
-  //               child: const Icon(
-  //                 Icons.calculate_outlined,
-  //                 color: Colors.white,
-  //                 size: 24,
-  //               ),
-  //             ),
-  //           ],
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // --- دالة مساعدة لبناء الـ Chips في الهيدر ---
-  // Widget _buildStatusChip(String text, Color backgroundColor, Color textColor) {
-  //   return Container(
-  //     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-  //     decoration: BoxDecoration(
-  //       color: backgroundColor,
-  //       borderRadius: BorderRadius.circular(20),
-  //     ),
-  //     child: Text(
-  //       text,
-  //       style: TextStyle(
-  //         color: textColor,
-  //         fontWeight: FontWeight.bold,
-  //         fontSize: 12,
-  //       ),
-  //     ),
-  //   );
-  // }
-
-  // --- دالة شريط التنقل (لا تغيير هنا) ---
+  // 3. تعديل شريط التنقل لإضافة زر النسخ الاحتياطي
   Widget _buildCustomNavigationBar() {
     return Container(
       width: double.infinity,
@@ -176,12 +119,67 @@ class _IndexPageState extends State<IndexPage> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: List.generate(_pages.length, (index) {
-          return Expanded(
-            // ✅ Expanded هنا فقط
-            child: _buildNavItem(index),
-          );
-        }),
+        children: [
+          // قائمة الصفحات (تأخذ المساحة المتبقية)
+          ...List.generate(_pages.length, (index) {
+            return Expanded(child: _buildNavItem(index));
+          }),
+
+          // فاصل عمودي صغير
+          Container(
+            height: 30,
+            width: 1,
+            color: Colors.grey[300],
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+
+          // زر النسخ الاحتياطي (مميز بلون مختلف)
+          _buildBackupButton(),
+        ],
+      ),
+    );
+  }
+
+  // تصميم زر النسخ الاحتياطي
+  Widget _buildBackupButton() {
+    return Tooltip(
+      message: 'نسخ احتياطي لقاعدة البيانات',
+      textStyle: const TextStyle(fontFamily: 'Tajawal', color: Colors.white),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _performBackup,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              // لون برتقالي فاتح لتمييزه عن باقي الأزرار
+              color: Colors.orange.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.backup_outlined,
+                  color: Colors.orange,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  "نسخ احتياطي",
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Tajawal', // تأكيد الخط
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -198,7 +196,7 @@ class _IndexPageState extends State<IndexPage> {
           });
         },
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 4), // إضافة هامش بسيط
+          margin: const EdgeInsets.symmetric(horizontal: 4),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: isSelected ? null : Colors.transparent,
@@ -240,7 +238,7 @@ class _IndexPageState extends State<IndexPage> {
                     style: TextStyle(
                       color: isSelected ? Colors.white : Colors.grey[700],
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 12, // قمت بتصغير الخط قليلاً ليتسع للجميع
                     ),
                   ),
                 ],

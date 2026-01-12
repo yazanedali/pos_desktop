@@ -691,4 +691,14 @@ class DatabaseHelper {
       await updateProductAveragePurchasePrice(productName);
     }
   }
+
+  Future<String> getDatabasePath() async {
+    Directory documentsDirectory;
+    try {
+      documentsDirectory = await getApplicationDocumentsDirectory();
+    } catch (e) {
+      documentsDirectory = Directory.current;
+    }
+    return join(documentsDirectory.path, 'pos_database.db');
+  }
 }
