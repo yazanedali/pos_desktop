@@ -167,16 +167,17 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
   }
 
+  // --- دوال الإضافة والتعديل والحذف ---
+
   void _addInvoice(
     PurchaseInvoice invoice,
     String updateMethod,
-    String boxName,
+    String boxName, // <-- المعامل الثالث موجود
   ) async {
-    // ← تحديث
     try {
       await _purchaseQueries.insertPurchaseInvoice(
         invoice,
-        purchasePriceUpdateMethod: updateMethod, // ← تمرير الخيار
+        purchasePriceUpdateMethod: updateMethod,
       );
       TopAlert.showSuccess(
         context: context,
@@ -187,7 +188,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
       if (invoice.paidAmount > 0) {
         await _cashService.recordPurchasePayment(
           amount: invoice.paidAmount,
-          boxName: boxName,
+          boxName: boxName, // <-- استخدام اسم الصندوق
           invoiceNumber: invoice.invoiceNumber,
           supplierName: invoice.supplier,
         );
@@ -202,13 +203,13 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
   void _updateInvoice(
     PurchaseInvoice invoice,
     String updateMethod,
-    String boxName,
+    String boxName, // <-- المعامل الثالث موجود
   ) async {
-    // ← تحديث
     try {
       await _purchaseQueries.updatePurchaseInvoice(
         invoice,
         purchasePriceUpdateMethod: updateMethod,
+        boxName: boxName, // <-- هام جداً: تمرير اسم الصندوق للدالة الجديدة
       );
       TopAlert.showSuccess(
         context: context,
@@ -223,6 +224,22 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
   }
 
+  void _showAddInvoiceDialog() {
+    showDialog(
+      context: context,
+      builder:
+          (context) => PurchaseInvoiceDialog(
+            categories: _categories,
+            onSave: (invoice, updateMethod, boxName) {
+              // ← نستقبل boxName من الديالوج ونمرره لدالة الإضافة
+              _addInvoice(invoice, updateMethod, boxName);
+              Navigator.of(context).pop();
+            },
+            onCancel: () => Navigator.of(context).pop(),
+          ),
+    );
+  }
+
   void _showEditInvoiceDialog(PurchaseInvoice invoice) {
     showDialog(
       context: context,
@@ -231,7 +248,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
             categories: _categories,
             invoiceToEdit: invoice,
             onSave: (updatedInvoice, updateMethod, boxName) {
-              // ← تحديث
+              // ← نستقبل boxName من الديالوج ونمرره لدالة التعديل
               _updateInvoice(updatedInvoice, updateMethod, boxName);
               Navigator.of(context).pop();
             },
@@ -265,21 +282,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     );
   }
 
-  void _showAddInvoiceDialog() {
-    showDialog(
-      context: context,
-      builder:
-          (context) => PurchaseInvoiceDialog(
-            categories: _categories,
-            onSave: (invoice, updateMethod, boxName) {
-              // ← تحديث هنا
-              _addInvoice(invoice, updateMethod, boxName);
-              Navigator.of(context).pop();
-            },
-            onCancel: () => Navigator.of(context).pop(),
-          ),
-    );
-  }
+  // --- بناء الواجهة ---
 
   @override
   Widget build(BuildContext context) {
@@ -606,8 +609,18 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
 
     // حساب نسبة الدفع
+    // ملاحظة: invoice.total هنا هو الصافي بعد الخصم
+    // invoice.total مخزنة في الداتابيس كصافي (net total)
+    double netTotal = invoice.total;
+
+    // إذا كنت تريد عرض الإجمالي قبل الخصم الكلي، استخدم:
+    // double grossTotal = netTotal + invoice.discount;
+
     double paymentPercentage =
-        invoice.total > 0 ? (invoice.paidAmount / invoice.total) * 100 : 0;
+        netTotal > 0 ? (invoice.paidAmount / netTotal) * 100 : 0;
+
+    // تصحيح: لا يمكن أن تكون النسبة أكثر من 100%
+    if (paymentPercentage > 100) paymentPercentage = 100;
 
     return Card(
       elevation: 2,
@@ -739,7 +752,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      "${invoice.total.toStringAsFixed(2)} ش",
+                      "${netTotal.toStringAsFixed(2)} ش",
                       style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
@@ -835,7 +848,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
 
                         if (invoice.paymentStatus == 'غير مدفوع')
                           Text(
-                            'مديونية: ${invoice.total.toStringAsFixed(2)} ش',
+                            'مديونية: ${netTotal.toStringAsFixed(2)} ش',
                             style: TextStyle(
                               color: statusColor,
                               fontSize: 12,

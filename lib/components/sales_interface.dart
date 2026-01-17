@@ -505,6 +505,9 @@ class _SalesInterfaceState extends State<SalesInterface>
 
       final List<SaleInvoiceItem> invoiceItems =
           _cartItems.map((cartItem) {
+            print(
+              'DEBUG: Processing Cart Item: ${cartItem.name}, Purchase Price: ${cartItem.purchasePrice}',
+            );
             return SaleInvoiceItem(
               invoiceId: 0,
               productId: cartItem.id,
@@ -514,6 +517,9 @@ class _SalesInterfaceState extends State<SalesInterface>
               total: cartItem.price * cartItem.quantity,
               unitQuantity: cartItem.unitQuantity,
               unitName: cartItem.unitName,
+              costPrice:
+                  cartItem
+                      .purchasePrice, // <-- تخزين سعر الشراء الحالي كتكلفة ثابتة
             );
           }).toList();
 

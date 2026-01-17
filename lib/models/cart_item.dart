@@ -47,6 +47,7 @@ class CartItem {
       quantity: quantity ?? this.quantity,
       barcode: barcode ?? this.barcode,
       stock: stock ?? this.stock,
+      purchasePrice: purchasePrice,
       unitName: unitName,
       unitQuantity: unitQuantity,
       availablePackages: availablePackages ?? this.availablePackages,

@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 8, // غير من 7 إلى 8 لتعريف الصناديق
+      version: 11, // changed from 9 to 10
       onCreate: _createDatabase,
       onUpgrade: (db, oldVersion, newVersion) async {
         // Migration path: v2 -> v3 add product_barcodes table
@@ -244,6 +244,100 @@ class DatabaseHelper {
             )
           ''');
         }
+
+        // Migration path: v8 -> v9 (Add cost_price to sales_invoice_items)
+        if (oldVersion < 9) {
+          // 1. إضافة العمود cost_price
+          try {
+            await db.execute(
+              "ALTER TABLE sales_invoice_items ADD COLUMN cost_price REAL DEFAULT 0",
+            );
+          } catch (e) {
+            // Column might already exist
+          }
+
+          // 2. تحديث السجلات القديمة: جلب سعر الشراء الحالي للمنتج وتخزينه كـ cost_price
+          // هذا إجراء تقريبي للمبيعات السابقة، لكنه أفضل من الصفر
+          await db.transaction((txn) async {
+            // نقوم بتحديث السجلات دفعة واحدة باستخدام join (SQLite يدعم update مع join في بعض الحالات،
+            // ولكن الأضمن هو عمل loop أو subquery).
+            // سنستخدم Subquery للتحديث:
+            await txn.rawUpdate('''
+               UPDATE sales_invoice_items
+               SET cost_price = (
+                 SELECT purchase_price 
+                 FROM products 
+                 WHERE products.id = sales_invoice_items.product_id
+               )
+               WHERE cost_price = 0 OR cost_price IS NULL
+             ''');
+
+            // في حال لم يكن product_id متاحاً (نادر)، نحاول بالاسم
+            await txn.rawUpdate('''
+               UPDATE sales_invoice_items
+               SET cost_price = (
+                 SELECT purchase_price 
+                 FROM products 
+                 WHERE products.name = sales_invoice_items.product_name
+               )
+               WHERE (cost_price = 0 OR cost_price IS NULL)
+             ''');
+          });
+        }
+
+        // Migration path: v9 -> v10 (Retry/Force backfill cost_price)
+        if (oldVersion < 10) {
+          // إعادة محاولة تحديث الأسعار الصفرية للتأكد من تثبيت التكلفة
+          await db.transaction((txn) async {
+            // طباعة للتأكد من تشغيل الترحيل
+            print('Creating v10 migration: Backfilling cost_price...');
+
+            // التأكد من وجود العمود أولاً
+            try {
+              await db.execute(
+                "ALTER TABLE sales_invoice_items ADD COLUMN cost_price REAL DEFAULT 0",
+              );
+            } catch (e) {
+              // تجاهل الخطأ إذا العمود موجود
+            }
+
+            // التحديث القوي: نحدث أي سجل تكلفته 0
+            // ملاحظة: نستخدم COALESCE(purchase_price, 0) لتجنب null
+            await txn.rawUpdate('''
+               UPDATE sales_invoice_items
+               SET cost_price = (
+                 SELECT COALESCE(purchase_price, 0)
+                 FROM products 
+                 WHERE products.id = sales_invoice_items.product_id
+               )
+               WHERE (cost_price IS NULL OR cost_price = 0)
+             ''');
+
+            // محاولة ثانية بالاسم للمنتجات التي قد يكون رابط الـ id فيها مكسوراً
+            await txn.rawUpdate('''
+               UPDATE sales_invoice_items
+               SET cost_price = (
+                 SELECT COALESCE(purchase_price, 0)
+                 FROM products 
+                 WHERE products.name = sales_invoice_items.product_name
+               )
+               WHERE (cost_price IS NULL OR cost_price = 0)
+             ''');
+          });
+        }
+        if (oldVersion < 11) {
+          try {
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN discount REAL DEFAULT 0",
+            );
+          } catch (e) {}
+
+          try {
+            await db.execute(
+              "ALTER TABLE purchase_invoice_items ADD COLUMN discount REAL DEFAULT 0",
+            );
+          } catch (e) {}
+        }
       },
     );
 
@@ -342,6 +436,7 @@ class DatabaseHelper {
         total REAL NOT NULL,
         unit_quantity REAL NOT NULL DEFAULT 1.0,
         unit_name TEXT NOT NULL DEFAULT 'حبة',
+        cost_price REAL DEFAULT 0,
         FOREIGN KEY (invoice_id) REFERENCES sales_invoices (id) ON DELETE CASCADE
       )
     ''');
@@ -355,6 +450,13 @@ class DatabaseHelper {
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         total REAL NOT NULL,
+        discount REAL DEFAULT 0,  -- <--- تمت الإضافة
+        supplier_id INTEGER,      -- تأكدنا من إضافتها هنا أيضاً لتجنب المشاكل
+        payment_status TEXT DEFAULT 'مدفوع',
+        paid_amount REAL DEFAULT 0,
+        remaining_amount REAL DEFAULT 0,
+        payment_type TEXT DEFAULT 'نقدي',
+        notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     ''');
@@ -370,6 +472,7 @@ class DatabaseHelper {
         quantity REAL NOT NULL,
         purchase_price REAL NOT NULL,
         sale_price REAL NOT NULL,
+        discount REAL DEFAULT 0, -- <--- تمت الإضافة
         total REAL NOT NULL,
         FOREIGN KEY (invoice_id) REFERENCES purchase_invoices (id) ON DELETE CASCADE
       )

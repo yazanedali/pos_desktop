@@ -32,159 +32,352 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // المعادلة المحاسبية:
+    // الصافي النهائي (المخزن) = (مجموع صافي البنود) - الخصم العام
+    // إذن: مجموع صافي البنود = الصافي النهائي + الخصم العام
+    final double subtotalOfItems = invoice.total + invoice.discount;
+
     return Directionality(
-      textDirection: TextDirection.rtl, // <<< المهم هنا
+      textDirection: TextDirection.rtl,
       child: Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          constraints: const BoxConstraints(maxHeight: 600),
+          // وسعنا العرض شوي عشان الأعمدة الكثيرة
+          constraints: const BoxConstraints(maxHeight: 750, maxWidth: 1100),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 1. رأس الفاتورة
                 Row(
                   children: [
-                    const Icon(Icons.receipt, color: Colors.blue),
-                    const SizedBox(width: 8),
-                    const Text(
-                      "تفاصيل فاتورة الشراء",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    const Icon(
+                      Icons.receipt_long,
+                      color: Colors.blue,
+                      size: 28,
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "كشف تفاصيل فاتورة",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          invoice.invoiceNumber,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                            fontFamily: 'Courier', // خط يشبه الفواتير
+                          ),
+                        ),
+                      ],
                     ),
                     const Spacer(),
-                    Text(
-                      invoice.invoiceNumber,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            invoice.paymentStatus == 'مدفوع'
+                                ? Colors.green[50]
+                                : Colors.orange[50],
+                        border: Border.all(
+                          color:
+                              invoice.paymentStatus == 'مدفوع'
+                                  ? Colors.green
+                                  : Colors.orange,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        invoice.paymentStatus,
+                        style: TextStyle(
+                          color:
+                              invoice.paymentStatus == 'مدفوع'
+                                  ? Colors.green[800]
+                                  : Colors.orange[800],
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 20),
 
-                // معلومات الفاتورة
+                // 2. معلومات المورد والتاريخ
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.blue[50],
+                    color: Colors.grey[50],
+                    border: Border.all(color: Colors.grey[200]!),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
-                      _buildInfoItem("التاريخ", invoice.date),
-                      _buildInfoItem("الوقت", invoice.time),
-                      _buildInfoItem("المورد", invoice.supplier),
                       _buildInfoItem(
-                        "عدد المنتجات",
-                        "${invoice.items.length} منتج",
+                        Icons.calendar_today,
+                        "التاريخ",
+                        invoice.date,
+                      ),
+                      _buildInfoItem(Icons.access_time, "الوقت", invoice.time),
+                      _buildInfoItem(
+                        Icons.business,
+                        "المورد",
+                        invoice.supplier,
+                      ),
+                      _buildInfoItem(
+                        Icons.shopping_bag_outlined,
+                        "البنود",
+                        "${invoice.items.length}",
                       ),
                     ],
                   ),
                 ),
 
                 const SizedBox(height: 20),
-
                 const Text(
-                  "تفاصيل المنتجات",
+                  "بنود الفاتورة:",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
 
+                // 3. جدول البيانات المفصل (محاسبي)
                 Expanded(
-                  child: SingleChildScrollView(
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text("المنتج")),
-                        DataColumn(label: Text("الباركود")),
-                        DataColumn(label: Text("الفئة")),
-                        DataColumn(label: Text("سعر الشراء")),
-                        DataColumn(label: Text("سعر البيع")),
-                        DataColumn(label: Text("الكمية")),
-                        DataColumn(label: Text("الإجمالي")),
-                      ],
-                      rows:
-                          invoice.items.map((item) {
-                            return DataRow(
-                              cells: [
-                                DataCell(Text(item.productName)),
-                                DataCell(Text(item.barcode)),
-                                DataCell(
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SingleChildScrollView(
+                      child: DataTable(
+                        headingRowColor: MaterialStateProperty.all(
+                          Colors.blue[50],
+                        ),
+                        columnSpacing: 20, // مسافة بين الأعمدة
+                        columns: const [
+                          DataColumn(label: Text("المنتج")),
+                          DataColumn(label: Text("الفئة")),
+                          DataColumn(label: Text("الكمية")),
+                          DataColumn(label: Text("سعر الوحدة")),
+                          // الأعمدة المحاسبية الجديدة
+                          DataColumn(label: Text("الإجمالي (قبل)")),
+                          DataColumn(
+                            label: Text(
+                              "قيمة الخصم",
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
+                          DataColumn(
+                            label: Text(
+                              "الصافي (بعد)",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                        rows:
+                            invoice.items.map((item) {
+                              // الحسابات لكل سطر
+                              double grossTotal =
+                                  item.quantity *
+                                  item.purchasePrice; // الإجمالي قبل الخصم
+
+                              return DataRow(
+                                cells: [
+                                  // المنتج والباركود
+                                  DataCell(
+                                    Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.productName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        if (item.barcode.isNotEmpty)
+                                          Text(
+                                            item.barcode,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey[600],
+                                            ),
+                                          ),
+                                      ],
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: _getCategoryColor(item.category),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      item.category,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
+                                  ),
+                                  // الفئة (مع الألوان)
+                                  DataCell(
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _getCategoryColor(item.category),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        item.category,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    "${item.purchasePrice.toStringAsFixed(2)} شيكل",
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    "${item.salePrice.toStringAsFixed(2)} شيكل",
-                                    style: const TextStyle(color: Colors.green),
-                                  ),
-                                ),
-                                DataCell(Text(item.quantity.toString())),
-                                DataCell(
-                                  Text(
-                                    "${item.total.toStringAsFixed(2)} شيكل",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
+                                  DataCell(Text(item.quantity.toString())),
+                                  DataCell(
+                                    Text(
+                                      "${item.purchasePrice.toStringAsFixed(2)}",
                                     ),
                                   ),
-                                ),
-                              ],
-                            );
-                          }).toList(),
+
+                                  // الإجمالي قبل الخصم
+                                  DataCell(
+                                    Text(
+                                      "${grossTotal.toStringAsFixed(2)}",
+                                      style: TextStyle(color: Colors.grey[700]),
+                                    ),
+                                  ),
+
+                                  // قيمة الخصم
+                                  DataCell(
+                                    Text(
+                                      item.discount > 0
+                                          ? "-${item.discount.toStringAsFixed(2)}"
+                                          : "-",
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight:
+                                            item.discount > 0
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+
+                                  // الصافي النهائي للسطر
+                                  DataCell(
+                                    Text(
+                                      "${item.total.toStringAsFixed(2)}",
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }).toList(),
+                      ),
                     ),
                   ),
                 ),
 
                 const SizedBox(height: 20),
 
+                // 4. ملخص الحسابات (Footer) - تصميم محاسبي
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
+                    color: Colors.grey[50],
                     border: Border.all(color: Colors.grey[300]!),
                     borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        "المبلغ الإجمالي:",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        blurRadius: 5,
+                        offset: const Offset(0, 2),
                       ),
-                      Text(
-                        "${invoice.total.toStringAsFixed(2)} شيكل",
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
-                        ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      // مجموع البنود
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "مجموع البنود (بعد خصومات الأسطر):",
+                            style: TextStyle(fontSize: 15),
+                          ),
+                          Text(
+                            "${subtotalOfItems.toStringAsFixed(2)} شيكل",
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // الخصم الكلي للفاتورة
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "خصم إضافي على الفاتورة (كلي):",
+                            style: TextStyle(fontSize: 15, color: Colors.red),
+                          ),
+                          Text(
+                            "- ${invoice.discount.toStringAsFixed(2)} شيكل",
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 10),
+                        child: Divider(thickness: 1),
+                      ),
+
+                      // المجموع النهائي
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "الإجمالي النهائي المستحق:",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[50],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              "${invoice.total.toStringAsFixed(2)} شيكل",
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.blue,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -192,11 +385,30 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
 
                 const SizedBox(height: 20),
 
+                // 5. زر الإغلاق
                 SizedBox(
                   width: double.infinity,
-                  child: OutlinedButton(
+                  height: 45,
+                  child: OutlinedButton.icon(
                     onPressed: onClose,
-                    child: const Text("إغلاق"),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.grey),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 20,
+                      color: Colors.black,
+                    ),
+                    label: const Text(
+                      "إغلاق الفاتورة",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -207,16 +419,30 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoItem(String label, String value) {
+  Widget _buildInfoItem(IconData icon, String label, String value) {
     return Expanded(
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          Icon(icon, size: 20, color: Colors.blueGrey),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
         ],
       ),

@@ -189,6 +189,32 @@ class CashService {
     await _cashQueries.addCashMovement(movement);
   }
 
+  // استرداد مبلغ من المورد (بسبب خصم أو تعديل فاتورة)
+  Future<void> recordPurchaseRefund({
+    required double amount,
+    required String boxName,
+    required String invoiceNumber,
+    String? supplierName,
+  }) async {
+    final box = await _cashQueries.getCashBoxByName(boxName);
+    if (box == null) return;
+
+    final now = DateTime.now();
+    final movement = CashMovement(
+      boxId: box.id!,
+      amount: amount,
+      type: 'استرداد مشتريات', // نوع حركة جديد يوضح أنه فلوس راجعة
+      direction: 'داخل', // يدخل للصندوق
+      notes:
+          'فائض تعديل فاتورة شراء #$invoiceNumber${supplierName != null ? " - $supplierName" : ""}',
+      date: _formatDate(now),
+      time: _formatTime(now),
+      relatedId: invoiceNumber,
+    );
+
+    await _cashQueries.addCashMovement(movement);
+  }
+
   String _formatDate(DateTime dt) =>
       "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
 

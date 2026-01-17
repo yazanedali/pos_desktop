@@ -1,6 +1,9 @@
+// في ملف new_reports_page.dart
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/models/report_models_new.dart';
 import 'package:pos_desktop/services/reports_service.dart';
+import 'package:pos_desktop/database/backup_service.dart'; // ← إضافة الاستيراد
+import 'package:pos_desktop/widgets/top_alert.dart'; // ← إضافة الاستيراد
 import 'widgets/summary_card.dart';
 import 'widgets/real_profit_card.dart';
 import 'widgets/debts_wallets_section.dart';
@@ -20,7 +23,6 @@ class _NewReportsPageState extends State<NewReportsPage> {
   final ReportsService _service = ReportsService();
   bool _isLoading = true;
 
-  // 1. التغيير هنا: التاريخ الافتراضي هو اليوم فقط
   DateTimeRange _dateRange = DateTimeRange(
     start: DateTime.now(),
     end: DateTime.now(),
@@ -40,13 +42,40 @@ class _NewReportsPageState extends State<NewReportsPage> {
     _loadData();
   }
 
-  // 2. دالة مساعدة لتنسيق العملة (منزلتين + شيكل)
+  // دالة النسخ الاحتياطي
+  Future<void> _performBackup() async {
+    // إظهار دائرة تحميل
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final backupService = BackupService();
+    String result = await backupService.createBackup(isAuto: false);
+
+    if (!mounted) return;
+
+    // إغلاق دائرة التحميل
+    Navigator.pop(context);
+
+    // التحقق من النتيجة لعرض التنبيه المناسب
+    if (result.contains("نجاح")) {
+      TopAlert.showSuccess(context: context, message: result);
+    } else if (result.contains("فقط")) {
+      // حالة النجاح الجزئي (محلياً فقط)
+      TopAlert.showWarning(context: context, message: result);
+    } else {
+      // حالة الفشل الكامل
+      TopAlert.showError(context: context, message: result);
+    }
+  }
+
   String _formatMoney(double amount) {
     final formatter = intl.NumberFormat('#,##0.00', 'en_US');
     return '${formatter.format(amount)} شيكل';
   }
 
-  // دوال لتغيير التاريخ بسرعة
   void _setDaily() {
     setState(() {
       final now = DateTime.now();
@@ -60,7 +89,6 @@ class _NewReportsPageState extends State<NewReportsPage> {
     setState(() {
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
-      // للحصول على آخر يوم في الشهر الحالي (نأخذ اليوم 0 من الشهر القادم)
       final endOfMonth = DateTime(now.year, now.month + 1, 0);
 
       _dateRange = DateTimeRange(start: startOfMonth, end: endOfMonth);
@@ -132,7 +160,6 @@ class _NewReportsPageState extends State<NewReportsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // تنسيق عرض التاريخ في العنوان
     String dateLabel = '';
     if (_selectedFilter == DateFilterType.daily) {
       dateLabel =
@@ -169,7 +196,11 @@ class _NewReportsPageState extends State<NewReportsPage> {
         elevation: 1,
         iconTheme: const IconThemeData(color: Colors.black),
         actions: [
-          // 3. أزرار الفلاتر السريعة
+          // زر النسخ الاحتياطي الجديد - يأتي أولاً
+          _buildBackupButton(),
+          const SizedBox(width: 16),
+
+          // أزرار الفلاتر السريعة
           _buildFilterButton('يومي', DateFilterType.daily, _setDaily),
           const SizedBox(width: 8),
           _buildFilterButton('شهري', DateFilterType.monthly, _setMonthly),
@@ -230,7 +261,6 @@ class _NewReportsPageState extends State<NewReportsPage> {
                 children: [
                   ReportSummaryCard(
                     title: 'إجمالي المبيعات',
-                    // 4. استخدام دالة التنسيق الجديدة
                     value: _formatMoney(_financialSummary!.totalSales),
                     icon: Icons.shopping_bag,
                     color: Colors.blue,
@@ -269,8 +299,6 @@ class _NewReportsPageState extends State<NewReportsPage> {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
-              // ملاحظة: إذا كان كرت الربح يعرض الأرقام بداخله، ستحتاج لتعديل الكرت نفسه
-              // لإضافة "شيكل" والكسور، أو تمرير البيانات كنصوص من هنا إذا كان يدعم ذلك
               RealProfitCard(data: _realProfit!),
             ],
 
@@ -322,6 +350,49 @@ class _NewReportsPageState extends State<NewReportsPage> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ودجت زر النسخ الاحتياطي
+  Widget _buildBackupButton() {
+    return Tooltip(
+      message: 'نسخ احتياطي لقاعدة البيانات',
+      textStyle: const TextStyle(fontFamily: 'Tajawal', color: Colors.white),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _performBackup,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1), // لون أخضر للتمييز
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.backup_outlined,
+                  color: Colors.green,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  "نسخ احتياطي",
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Tajawal',
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

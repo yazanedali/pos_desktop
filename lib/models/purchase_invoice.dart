@@ -13,6 +13,7 @@ class PurchaseInvoice {
   final double remainingAmount;
   final String paymentType; // 'نقدي', 'آجل', 'من الرصيد'
   final String? notes;
+  final double discount;
 
   PurchaseInvoice({
     this.id,
@@ -29,6 +30,7 @@ class PurchaseInvoice {
     this.remainingAmount = 0.0,
     this.paymentType = 'نقدي',
     this.notes,
+    this.discount = 0.0,
   });
 
   Map<String, dynamic> toMap() {
@@ -46,6 +48,7 @@ class PurchaseInvoice {
       'remaining_amount': remainingAmount,
       'payment_type': paymentType,
       'notes': notes,
+      'discount': discount,
     };
   }
 
@@ -65,6 +68,7 @@ class PurchaseInvoice {
       remainingAmount: (map['remaining_amount'] as num?)?.toDouble() ?? 0.0,
       paymentType: map['payment_type'] ?? 'نقدي',
       notes: map['notes'] as String?,
+      discount: (map['discount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -111,6 +115,7 @@ class PurchaseInvoiceItem {
   final double purchasePrice;
   final double salePrice;
   final String category;
+  final double discount; // <--- حقل جديد (خصم السطر)
   final double total;
 
   PurchaseInvoiceItem({
@@ -121,6 +126,7 @@ class PurchaseInvoiceItem {
     required this.purchasePrice,
     required this.salePrice,
     required this.category,
+    required this.discount,
     required this.total,
   });
 
@@ -133,6 +139,7 @@ class PurchaseInvoiceItem {
       'purchase_price': purchasePrice,
       'sale_price': salePrice,
       'category': category,
+      'discount': discount,
       'total': total,
     };
   }
@@ -146,6 +153,7 @@ class PurchaseInvoiceItem {
       purchasePrice: (map['purchase_price'] as num).toDouble(),
       salePrice: (map['sale_price'] as num).toDouble(),
       category: map['category'] as String,
+      discount: (map['discount'] as num?)?.toDouble() ?? 0.0,
       total: (map['total'] as num).toDouble(),
     );
   }
@@ -159,6 +167,7 @@ class PurchaseInvoiceItem {
     double? salePrice,
     String? category,
     double? total,
+    double? discount,
   }) {
     return PurchaseInvoiceItem(
       id: id ?? this.id,
@@ -169,6 +178,7 @@ class PurchaseInvoiceItem {
       salePrice: salePrice ?? this.salePrice,
       category: category ?? this.category,
       total: total ?? this.total,
+      discount: discount ?? this.discount,
     );
   }
 }

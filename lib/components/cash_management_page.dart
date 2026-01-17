@@ -286,8 +286,9 @@ class _CashManagementPageState extends State<CashManagementPage> {
                       onPressed: () async {
                         final amount = double.tryParse(amountController.text);
                         final reason = reasonController.text.trim();
-                        if (amount == null || amount <= 0 || reason.isEmpty)
+                        if (amount == null || amount <= 0 || reason.isEmpty) {
                           return;
+                        }
                         final box = _boxes.firstWhere(
                           (b) => b.name == selectedBox,
                         );
@@ -543,7 +544,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
                                       (h) => h['box_name'] == _historyBoxFilter,
                                     )
                                     .toList();
-                        if (filteredHistory.isEmpty)
+                        if (filteredHistory.isEmpty) {
                           return const Center(
                             child: Text(
                               "لا توجد نتائج",
@@ -553,6 +554,7 @@ class _CashManagementPageState extends State<CashManagementPage> {
                               ),
                             ),
                           );
+                        }
 
                         return ListView.separated(
                           padding: EdgeInsets.zero,

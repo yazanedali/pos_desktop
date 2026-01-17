@@ -93,6 +93,7 @@ class SaleInvoiceItem {
   final double total;
   final double unitQuantity;
   final String unitName;
+  final double costPrice; // <-- سعر التكلفة لحظة البيع
 
   SaleInvoiceItem({
     this.id,
@@ -103,10 +104,15 @@ class SaleInvoiceItem {
     required this.quantity,
     required this.total,
     this.unitQuantity = 1.0,
-    required this.unitName, // <-- required
+    required this.unitName,
+    this.costPrice = 0.0, // <-- default
   });
 
-  SaleInvoiceItem copyWith({double? quantity, double? total}) {
+  SaleInvoiceItem copyWith({
+    double? quantity,
+    double? total,
+    double? costPrice,
+  }) {
     return SaleInvoiceItem(
       id: id,
       invoiceId: invoiceId,
@@ -117,6 +123,7 @@ class SaleInvoiceItem {
       total: total ?? this.total,
       unitQuantity: unitQuantity,
       unitName: unitName,
+      costPrice: costPrice ?? this.costPrice,
     );
   }
 
@@ -127,11 +134,11 @@ class SaleInvoiceItem {
       productId: map['product_id'] ?? 0,
       productName: map['product_name'] ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      quantity: (map['quantity'] as num?)?.toDouble() ?? 0.0, // <-- double
+      quantity: (map['quantity'] as num?)?.toDouble() ?? 0.0,
       total: (map['total'] as num?)?.toDouble() ?? 0.0,
-      unitQuantity:
-          (map['unit_quantity'] as num?)?.toDouble() ?? 1.0, // <-- أضف هذا
-      unitName: map['unit_name'] ?? 'حبة', // <-- أضف هذا
+      unitQuantity: (map['unit_quantity'] as num?)?.toDouble() ?? 1.0,
+      unitName: map['unit_name'] ?? 'حبة',
+      costPrice: (map['cost_price'] as num?)?.toDouble() ?? 0.0, // <-- read
     );
   }
 
@@ -145,7 +152,8 @@ class SaleInvoiceItem {
       'quantity': quantity,
       'total': total,
       'unit_quantity': unitQuantity,
-      'unit_name': unitName, // <-- أضف هذا
+      'unit_name': unitName,
+      'cost_price': costPrice, // <-- write
     };
   }
 }

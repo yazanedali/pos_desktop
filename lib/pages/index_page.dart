@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/components/multi_tab_sales_page.dart';
-import 'package:pos_desktop/database/backup_service.dart';
-import 'package:pos_desktop/widgets/top_alert.dart';
 import '../components/product_management_page.dart';
 import '../components/sales_invoices.dart';
 import '../components/purchase_invoices.dart';
@@ -49,36 +47,6 @@ class _IndexPageState extends State<IndexPage> {
     Icons.account_balance_wallet_outlined,
   ];
 
-  // 2. دالة تنفيذ النسخ الاحتياطي
-  // 2. دالة تنفيذ النسخ الاحتياطي باستخدام TopAlert
-  Future<void> _performBackup() async {
-    // إظهار دائرة تحميل (يمكنك أيضاً استبدالها بـ TopAlert إذا أردت)
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final backupService = BackupService();
-    String result = await backupService.createBackup(isAuto: false);
-
-    if (!mounted) return;
-
-    // إغلاق دائرة التحميل
-    Navigator.pop(context);
-
-    // التحقق من النتيجة لعرض التنبيه المناسب
-    if (result.contains("نجاح")) {
-      TopAlert.showSuccess(context: context, message: result);
-    } else if (result.contains("فقط")) {
-      // حالة النجاح الجزئي (محلياً فقط)
-      TopAlert.showWarning(context: context, message: result);
-    } else {
-      // حالة الفشل الكامل
-      TopAlert.showError(context: context, message: result);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -101,6 +69,11 @@ class _IndexPageState extends State<IndexPage> {
   }
 
   // 3. تعديل شريط التنقل لإضافة زر النسخ الاحتياطي
+  // في ملف index_page.dart
+
+  // 1. إزالة دالة _performBackup بالكامل من الـ State
+
+  // 2. تعديل _buildCustomNavigationBar لإزالة زر النسخ الاحتياطي
   Widget _buildCustomNavigationBar() {
     return Container(
       width: double.infinity,
@@ -120,66 +93,11 @@ class _IndexPageState extends State<IndexPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // قائمة الصفحات (تأخذ المساحة المتبقية)
+          // قائمة الصفحات (تأخذ المساحة الكاملة الآن)
           ...List.generate(_pages.length, (index) {
             return Expanded(child: _buildNavItem(index));
           }),
-
-          // فاصل عمودي صغير
-          Container(
-            height: 30,
-            width: 1,
-            color: Colors.grey[300],
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-          ),
-
-          // زر النسخ الاحتياطي (مميز بلون مختلف)
-          _buildBackupButton(),
         ],
-      ),
-    );
-  }
-
-  // تصميم زر النسخ الاحتياطي
-  Widget _buildBackupButton() {
-    return Tooltip(
-      message: 'نسخ احتياطي لقاعدة البيانات',
-      textStyle: const TextStyle(fontFamily: 'Tajawal', color: Colors.white),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _performBackup,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              // لون برتقالي فاتح لتمييزه عن باقي الأزرار
-              color: Colors.orange.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.withOpacity(0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.backup_outlined,
-                  color: Colors.orange,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  "نسخ احتياطي",
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'Tajawal', // تأكيد الخط
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

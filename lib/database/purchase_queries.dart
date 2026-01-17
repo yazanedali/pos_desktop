@@ -10,7 +10,6 @@ class PurchaseQueries {
   // ثابت حجم الصفحة
   static const int pageSize = 15;
 
-  // ========== دالة مساعدة لتحديث سعر شراء المنتج (مع الخيار) ==========
   Future<void> _updateProductPurchasePrice({
     required Transaction txn,
     required String productName,
@@ -27,57 +26,63 @@ class PurchaseQueries {
           where: 'name = ?',
           whereArgs: [productName],
         );
-        print(
-          '✅ تم تحديث سعر شراء "$productName" إلى $newPurchasePrice (السعر الجديد)',
-        );
       } else {
-        // الطريقة الافتراضية: المتوسط المرجح
-        final result = await txn.rawQuery(
+        // الطريقة المُصَحَّحة: المتوسط المرجح بناءً على المخزون الحالي
+
+        // 1. جلب البيانات الحالية للمنتج
+        final productResult = await txn.rawQuery(
           '''
-        SELECT 
-          SUM(quantity * purchase_price) as total_cost,
-          SUM(quantity) as total_quantity
-        FROM purchase_invoice_items
-        WHERE product_name = ?
-      ''',
+        SELECT stock, purchase_price 
+        FROM products 
+        WHERE name = ? 
+        LIMIT 1
+        ''',
           [productName],
         );
 
-        if (result.isNotEmpty) {
-          final totalCost = result.first['total_cost'] as double? ?? 0.0;
-          final totalQuantity =
-              result.first['total_quantity'] as double? ?? 0.0;
+        if (productResult.isNotEmpty) {
+          final currentStock = productResult.first['stock'] as double? ?? 0.0;
+          final currentPurchasePrice =
+              productResult.first['purchase_price'] as double? ?? 0.0;
 
-          // حساب المتوسط المرجح
-          final weightedAvg =
-              (totalCost + (newPurchasePrice * newQuantity)) /
-              (totalQuantity + newQuantity);
+          // 2. حساب المتوسط المرجح
+          double weightedAvg;
 
+          if (currentStock <= 0) {
+            // إذا كان المخزون صفر أو أقل، نستخدم السعر الجديد فقط
+            weightedAvg = newPurchasePrice;
+          } else {
+            // حساب المتوسط المرجح الصحيح:
+            // (الكمية الحالية × السعر الحالي) + (الكمية الجديدة × السعر الجديد)
+            // ثم القسمة على إجمالي الكمية
+            final totalCurrentCost = currentStock * currentPurchasePrice;
+            final totalNewCost = newQuantity * newPurchasePrice;
+            final totalQuantity = currentStock + newQuantity;
+
+            weightedAvg = (totalCurrentCost + totalNewCost) / totalQuantity;
+          }
+
+          // 3. تحديث سعر الشراء في جدول المنتجات
           await txn.update(
             'products',
             {'purchase_price': weightedAvg},
             where: 'name = ?',
             whereArgs: [productName],
           );
-
-          print(
-            '✅ تم تحديث سعر شراء "$productName" إلى $weightedAvg (المتوسط المرجح)',
-          );
         } else {
-          // إذا لم يكن هناك مشتريات سابقة
+          // إذا لم يتم العثور على المنتج، نستخدم السعر الجديد
           await txn.update(
             'products',
             {'purchase_price': newPurchasePrice},
             where: 'name = ?',
             whereArgs: [productName],
           );
-          print(
-            '✅ تم تعيين سعر شراء "$productName" إلى $newPurchasePrice (أول شراء)',
-          );
         }
       }
     } catch (e) {
       print('❌ خطأ في تحديث سعر شراء المنتج "$productName": $e');
+      // إعادة رمي الخطأ للحفاظ على المعاملة (transaction)
+      rethrow;
     }
   }
 
@@ -115,7 +120,7 @@ class PurchaseQueries {
   Future<PurchaseInvoice> insertPurchaseInvoice(
     PurchaseInvoice invoice, {
     String purchasePriceUpdateMethod = 'جديد',
-    bool updateSalePrice = true, // ← معامل جديد لتحديث سعر البيع
+    bool updateSalePrice = true,
   }) async {
     final db = await dbHelper.database;
 
@@ -127,22 +132,14 @@ class PurchaseQueries {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      // إدخال العناصر وتحديث المخزون
+      // أولاً: تحديث أسعار الشراء (قبل تحديث المخزون)
       for (final item in invoice.items) {
         await txn.insert('purchase_invoice_items', {
           ...item.toMap(),
           'invoice_id': invoiceId,
         });
 
-        // تحديث المخزون
-        await _updateProductStock(
-          txn: txn,
-          barcode: item.barcode,
-          productName: item.productName,
-          quantity: item.quantity,
-        );
-
-        // تحديث سعر الشراء حسب الطريقة المختارة
+        // تحديث سعر الشراء أولاً (باستخدام المخزون الحالي قبل الإضافة)
         await _updateProductPurchasePrice(
           txn: txn,
           productName: item.productName,
@@ -151,7 +148,15 @@ class PurchaseQueries {
           updateMethod: purchasePriceUpdateMethod,
         );
 
-        // تحديث سعر البيع (جديد) ← أضف هذا
+        // ثم تحديث المخزون
+        await _updateProductStock(
+          txn: txn,
+          barcode: item.barcode,
+          productName: item.productName,
+          quantity: item.quantity,
+        );
+
+        // تحديث سعر البيع
         if (updateSalePrice && item.salePrice > 0) {
           await _updateProductSalePrice(
             txn: txn,
@@ -165,25 +170,102 @@ class PurchaseQueries {
     return invoice;
   }
 
-  // ========== دالة تعديل فاتورة شراء (محدثة مع الخيار) ==========
+  // ========== دالة تعديل فاتورة شراء (محدثة - إصلاح مشكلة القفل Database Locked) ==========
   Future<void> updatePurchaseInvoice(
     PurchaseInvoice invoice, {
     String purchasePriceUpdateMethod = 'جديد',
-    bool updateSalePrice = true, // ← معامل جديد
+    bool updateSalePrice = true,
+    String? boxName,
   }) async {
     final db = await dbHelper.database;
+    // ❌ لا نستخدم CashService هنا لأنه يفتح اتصالاً جديداً يسبب القفل
+    // final CashService cashService = CashService();
 
     await db.transaction((txn) async {
-      // جلب العناصر القديمة
+      // 1. جلب المدفوع القديم
+      final List<Map<String, dynamic>> oldInvoiceResult = await txn.query(
+        'purchase_invoices',
+        columns: ['paid_amount', 'total'],
+        where: 'id = ?',
+        whereArgs: [invoice.id],
+      );
+
+      double oldPaidAmount = 0.0;
+      if (oldInvoiceResult.isNotEmpty) {
+        oldPaidAmount = oldInvoiceResult.first['paid_amount'] as double? ?? 0.0;
+      }
+
+      // 2. تجهيز المتغيرات الجديدة
+      double newNetTotal = invoice.total;
+      double finalPaidAmount = invoice.paidAmount;
+      double finalRemainingAmount = invoice.remainingAmount;
+      String finalPaymentStatus = invoice.paymentStatus;
+
+      // 3. فحص الفائض
+      if (oldPaidAmount > newNetTotal) {
+        double refundAmount = oldPaidAmount - newNetTotal;
+
+        finalPaidAmount = newNetTotal;
+        finalRemainingAmount = 0.0;
+        finalPaymentStatus = 'مدفوع';
+
+        if (boxName != null && refundAmount > 0) {
+          // ✅ الحل: تنفيذ عمليات الصندوق يدوياً باستخدام txn الحالي لتجنب القفل
+
+          // أ. البحث عن الصندوق
+          final List<Map<String, dynamic>> boxResult = await txn.query(
+            'cash_boxes',
+            where: 'name = ?',
+            whereArgs: [boxName],
+            limit: 1,
+          );
+
+          if (boxResult.isNotEmpty) {
+            final int boxId = boxResult.first['id'];
+            final DateTime now = DateTime.now();
+            final String date =
+                "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+            final String time =
+                "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
+            // ب. تسجيل الحركة
+            await txn.insert('cash_movements', {
+              'box_id': boxId,
+              'amount': refundAmount,
+              'type': 'استرداد مشتريات',
+              'direction': 'داخل', // دخول فلوس للصندوق
+              'notes': 'فائض تعديل فاتورة شراء #${invoice.invoiceNumber}',
+              'date': date,
+              'time': time,
+              'related_id': invoice.invoiceNumber,
+              'created_at': now.toIso8601String(),
+            });
+
+            // ج. تحديث رصيد الصندوق (زيادة الرصيد)
+            await txn.rawUpdate(
+              'UPDATE cash_boxes SET balance = balance + ? WHERE id = ?',
+              [refundAmount, boxId],
+            );
+          }
+        }
+      }
+
+      PurchaseInvoice finalInvoice = invoice.copyWith(
+        paidAmount: finalPaidAmount,
+        remainingAmount: finalRemainingAmount,
+        paymentStatus: finalPaymentStatus,
+      );
+
+      // --- باقي العمليات (المخزون والمنتجات) كما هي ---
+
+      // أ. تراجع عن المخزون القديم
       final oldItemsMaps = await txn.query(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
-        whereArgs: [invoice.id],
+        whereArgs: [finalInvoice.id],
       );
       final oldItems =
           oldItemsMaps.map((map) => PurchaseInvoiceItem.fromMap(map)).toList();
-
-      // تراجع عن تحديث المخزون للعناصر القديمة
       for (final oldItem in oldItems) {
         await _updateProductStock(
           txn: txn,
@@ -193,29 +275,28 @@ class PurchaseQueries {
         );
       }
 
-      // تحديث الفاتورة الرئيسية
+      // ب. تحديث الفاتورة
       await txn.update(
         'purchase_invoices',
-        invoice.toMap(),
+        finalInvoice.toMap(),
         where: 'id = ?',
-        whereArgs: [invoice.id],
+        whereArgs: [finalInvoice.id],
       );
 
-      // حذف العناصر القديمة
+      // ج. حذف العناصر القديمة
       await txn.delete(
         'purchase_invoice_items',
         where: 'invoice_id = ?',
-        whereArgs: [invoice.id],
+        whereArgs: [finalInvoice.id],
       );
 
-      // إضافة العناصر الجديدة وتحديث المخزون
-      for (final newItem in invoice.items) {
+      // د. إضافة العناصر الجديدة
+      for (final newItem in finalInvoice.items) {
         await txn.insert('purchase_invoice_items', {
           ...newItem.toMap(),
-          'invoice_id': invoice.id,
+          'invoice_id': finalInvoice.id,
         });
 
-        // تحديث المخزون للعناصر الجديدة
         await _updateProductStock(
           txn: txn,
           barcode: newItem.barcode,
@@ -223,7 +304,6 @@ class PurchaseQueries {
           quantity: newItem.quantity,
         );
 
-        // تحديث سعر الشراء حسب الطريقة المختارة
         await _updateProductPurchasePrice(
           txn: txn,
           productName: newItem.productName,
@@ -232,7 +312,6 @@ class PurchaseQueries {
           updateMethod: purchasePriceUpdateMethod,
         );
 
-        // تحديث سعر البيع (جديد) ← أضف هذا
         if (updateSalePrice && newItem.salePrice > 0) {
           await _updateProductSalePrice(
             txn: txn,
@@ -263,6 +342,7 @@ class PurchaseQueries {
   }
 
   // ========== دالة حذف فاتورة شراء (محدثة) ==========
+  // ========== دالة حذف فاتورة شراء (محدثة) ==========
   Future<void> deletePurchaseInvoice(int id) async {
     final db = await dbHelper.database;
 
@@ -286,14 +366,15 @@ class PurchaseQueries {
         );
       }
 
-      // تحديث أسعار شراء المنتجات بعد الحذف
+      // إعادة حساب أسعار الشراء بعد الحذف
       for (final item in items) {
+        // نستخدم طريقة 'متوسط' لإعادة الحساب
         await _updateProductPurchasePrice(
           txn: txn,
           productName: item.productName,
-          newPurchasePrice: item.purchasePrice,
-          newQuantity: item.quantity.toInt(),
-          updateMethod: 'متوسط', // نستخدم المتوسط لإعادة الحساب
+          newPurchasePrice: 0.0, // لن يؤثر لأنه حساب معكوس
+          newQuantity: -item.quantity.toInt(), // كمية سالبة لأننا نحذف
+          updateMethod: 'متوسط',
         );
       }
 

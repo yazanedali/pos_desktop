@@ -225,12 +225,14 @@ class SalesInvoiceService {
       try {
         final debtCashResult = await db.rawQuery(
           '''
-          SELECT SUM(amount) as sum 
-          FROM payment_records 
-          WHERE payment_date = ? 
-          AND payment_method != 'من الرصيد'
+          SELECT SUM(pr.amount) as sum 
+          FROM payment_records pr
+          LEFT JOIN sales_invoices si ON pr.invoice_id = si.id
+          WHERE pr.payment_date = ? 
+          AND pr.payment_method != 'من الرصيد'
+          AND si.date != ? -- ✅ استثناء الفواتير التي أنشئت اليوم (فقط سداد الديون القديمة)
           ''',
-          [todayFormatted],
+          [todayFormatted, todayFormatted],
         );
         debtCash = (debtCashResult.first['sum'] as num?)?.toDouble() ?? 0.0;
       } catch (e) {
@@ -255,7 +257,7 @@ class SalesInvoiceService {
       // ب. تكلفة فواتير اليوم
       final todayCostResult = await db.rawQuery(
         '''
-        SELECT SUM(sii.quantity * COALESCE(p.purchase_price, 0)) as cogs
+        SELECT SUM(sii.quantity * sii.unit_quantity * COALESCE(NULLIF(sii.cost_price, 0), p.purchase_price, 0)) as cogs
         FROM sales_invoice_items sii
         JOIN sales_invoices si ON sii.invoice_id = si.id
         LEFT JOIN products p ON sii.product_id = p.id
@@ -504,6 +506,36 @@ class SalesInvoiceService {
 
       // إدخال عناصر الفاتورة وتحديث المخزون
       for (final item in items) {
+        double finalCostPrice = item.costPrice;
+
+        // --- Fail-Safe: إذا كانت التكلفة صفر، نجلبها من قاعدة البيانات مباشرة ---
+        // هذا يضمن عدم ضياع التكلفة بسبب أي خلل في الواجهة
+        if (finalCostPrice == 0 && item.productId != null) {
+          try {
+            final productResult = await txn.rawQuery(
+              'SELECT purchase_price FROM products WHERE id = ?',
+              [item.productId],
+            );
+            if (productResult.isNotEmpty) {
+              final dbPrice =
+                  (productResult.first['purchase_price'] as num?)?.toDouble() ??
+                  0.0;
+              if (dbPrice > 0) {
+                print(
+                  '⚠️ Recovered Cost Price for ${item.productName}: $dbPrice',
+                );
+                finalCostPrice = dbPrice;
+              }
+            }
+          } catch (e) {
+            print('Error fetching fallback cost: $e');
+          }
+        }
+        // -----------------------------------------------------------------------
+
+        print(
+          'DEBUG: Inserting Invoice Item: ${item.productName}, Cost Price: $finalCostPrice',
+        );
         await txn.insert('sales_invoice_items', {
           'invoice_id': invoiceId,
           'product_id': item.productId,
@@ -513,6 +545,7 @@ class SalesInvoiceService {
           'total': item.total,
           'unit_quantity': item.unitQuantity,
           'unit_name': item.unitName,
+          'cost_price': item.costPrice,
         });
 
         final totalQuantity = item.quantity * item.unitQuantity;

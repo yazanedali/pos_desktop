@@ -39,22 +39,22 @@ class ReportsService {
     // 2. سداد الديون (Debt payments)
     double debtPayments = 0.0;
     try {
-      // أيضاً نستثني إذا تم سداد دين "من الرصيد" (للاحتياط)
-      // إذا جدول payment_records لا يحتوي على payment_method، احذف الشرط الأخير
       final debtPaymentsResult = await db.rawQuery(
         '''
-        SELECT SUM(amount) as debt_cash
-        FROM payment_records
-        WHERE payment_date BETWEEN ? AND ?
-        AND payment_method != 'من الرصيد' -- ✅ تم الاستثناء هنا أيضاً
+        SELECT SUM(pr.amount) as debt_cash
+        FROM payment_records pr
+        LEFT JOIN sales_invoices si ON pr.invoice_id = si.id
+        WHERE pr.payment_date BETWEEN ? AND ?
+        AND pr.payment_method != 'من الرصيد'
+        AND (si.date < ? OR si.date > ?) -- ✅ استثناء الفواتير التي أنشئت في نفس فترة التقرير
       ''',
-        [from, to],
+        [from, to, from, to],
       );
       debtPayments =
           (debtPaymentsResult.first['debt_cash'] as num?)?.toDouble() ?? 0.0;
     } catch (e) {
-      // في حال الجدول القديم لا يحتوي على عمود payment_method، نجمع الكل
-      // أو يمكننا تجاهل الخطأ إذا لم يكن الجدول موجوداً
+      // في حال حدوث خطأ، نعود للطريقة القديمة (مع خطر التكرار ولكن لضمان عدم توقف التطبيق)
+      print('Warning: debt payment query issue: $e');
       try {
         final debtPaymentsResultOld = await db.rawQuery(
           '''
@@ -68,7 +68,7 @@ class ReportsService {
             (debtPaymentsResultOld.first['debt_cash'] as num?)?.toDouble() ??
             0.0;
       } catch (e2) {
-        print('Warning: payment_records issue: $e2');
+        print('Critical: payment_records issue: $e2');
       }
     }
 
@@ -234,9 +234,11 @@ class ReportsService {
     }
 
     // B. تكلفة البضاعة المباعة (COGS)
+    // نستخدم sii.cost_price (التي تخزن التكلفة لحظة البيع) إذا توفرت
+    // وإلا نعود لـ p.purchase_price (التكلفة الحالية) كحل احتياطي
     final cogsResult = await db.rawQuery(
       '''
-      SELECT SUM(sii.quantity * COALESCE(p.purchase_price, 0)) as cogs
+      SELECT SUM(sii.quantity * sii.unit_quantity * COALESCE(NULLIF(sii.cost_price, 0), p.purchase_price, 0)) as cogs
       FROM sales_invoice_items sii
       JOIN sales_invoices si ON sii.invoice_id = si.id
       LEFT JOIN products p ON sii.product_id = p.id
