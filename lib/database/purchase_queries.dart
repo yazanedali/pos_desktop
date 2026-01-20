@@ -527,4 +527,35 @@ class PurchaseQueries {
       }
     });
   }
+
+  // ========== دالة الحصول على كشف حساب المورد ==========
+  Future<List<PurchaseInvoice>> getSupplierStatement({
+    required int supplierId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final db = await dbHelper.database;
+
+    try {
+      final invoices = await db.rawQuery(
+        '''
+      SELECT * FROM purchase_invoices 
+      WHERE supplier_id = ? 
+        AND date BETWEEN ? AND ?
+      ORDER BY date DESC, time DESC
+    ''',
+        [supplierId, startDate, endDate],
+      );
+
+      // جلب المنتجات لكل فاتورة
+      return Future.wait(
+        invoices.map((invoiceMap) async {
+          final items = await getPurchaseInvoiceItems(invoiceMap['id'] as int);
+          return PurchaseInvoice.fromMap(invoiceMap).copyWith(items: items);
+        }),
+      );
+    } catch (e) {
+      throw Exception('فشل في تحميل كشف حساب المورد: $e');
+    }
+  }
 }

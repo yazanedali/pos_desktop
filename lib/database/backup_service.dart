@@ -6,81 +6,87 @@ import 'database_helper.dart';
 
 class BackupService {
   final Cron _cron = Cron();
-  final int maxBackupCount = 5; // الحد الأقصى لعدد الملفات
+  final int maxBackupCount = 5;
 
-  // تشغيل الجدولة التلقائية
   void startScheduledBackup() {
-    print("Backup Scheduler Started...");
+    // جدولة كل 6 ساعات
     _cron.schedule(Schedule.parse('0 */6 * * *'), () async {
-      print("Starting scheduled backup...");
       await createBackup(isAuto: true);
     });
   }
 
-  // دالة إنشاء النسخة الاحتياطية
   Future<String> createBackup({bool isAuto = false}) async {
     try {
       final dbHelper = DatabaseHelper();
       final String currentDbPath = await dbHelper.getDatabasePath();
       final File dbFile = File(currentDbPath);
 
-      if (!await dbFile.exists()) return "قاعدة البيانات غير موجودة";
+      if (!await dbFile.exists()) return "قاعدة البيانات الأصلية غير موجودة";
 
-      final DateTime now = DateTime.now();
-      final String timestamp = DateFormat('yyyy-MM-dd_HH-mm-ss').format(now);
+      final String timestamp = DateFormat(
+        'yyyy-MM-dd_HH-mm-ss',
+      ).format(DateTime.now());
       final String fileName =
           '${isAuto ? 'auto' : 'manual'}_backup_$timestamp.db';
 
-      // مسار المجلد على جوجل درايف
-      final String backupDirPath = r'G:\My Drive\POS_Backups';
-      final String drivePath = join(backupDirPath, fileName);
+      // --- التعديل هنا: مسار مباشر على الفلاشة بعيداً عن مجلدات الدرايف ---
+      // تأكد أن المسار لا يحتوي على "My Drive" أو أي اسم متعلق بجوجل درايف
+      final String backupDirPath = r'D:\POS_System_Backups';
+      final String fullPath = join(backupDirPath, fileName);
 
-      try {
-        // 1. التأكد من وجود المجلد
-        final Directory dir = Directory(backupDirPath);
-        if (!await dir.exists()) {
-          await dir.create(recursive: true);
-        }
+      final Directory dir = Directory(backupDirPath);
 
-        // 2. عمل النسخة الجديدة
-        await dbFile.copy(drivePath);
-
-        // 3. تنظيف الملفات القديمة (الإبقاء على آخر 5 فقط)
-        await _cleanOldBackups(dir);
-
-        return "تم النسخ بنجاح (تم الإبقاء على آخر $maxBackupCount نسخ)";
-      } catch (e) {
-        return "فشل الوصول للدرايف: $e";
+      // فحص وجود الفلاشة (D:)
+      if (!await Directory('D:\\').exists()) {
+        return "فشل: الفلاشة (القرص D) غير متصلة بالجهاز";
       }
+
+      // إنشاء المجلد إذا لم يكن موجوداً
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
+      // عملية النسخ (Async) لضمان عدم توقف واجهة البيع
+      await dbFile.copy(fullPath);
+
+      // تنظيف النسخ القديمة
+      await _cleanOldBackups(dir);
+
+      return "تم النسخ بنجاح إلى الفلاشة";
     } catch (e) {
-      return "فشل النسخ الاحتياطي بالكامل: $e";
+      // في حال وجود خطأ (مثلاً الفلاشة محمية من الكتابة أو مفصولة)
+      return "خطأ في الوصول للفلاشة: $e";
     }
   }
 
-  // دالة حذف الملفات القديمة
   Future<void> _cleanOldBackups(Directory dir) async {
     try {
-      // جلب قائمة الملفات التي تنتهي بـ .db
-      List<FileSystemEntity> files =
-          dir.listSync().where((file) => file.path.endsWith('.db')).toList();
+      // جلب الملفات بشكل غير متزامن تماماً
+      List<FileSystemEntity> files = [];
+      await for (var entity in dir.list()) {
+        if (entity.path.endsWith('.db')) {
+          files.add(entity);
+        }
+      }
 
-      // إذا كان عدد الملفات أكبر من الحد المسموح
       if (files.length > maxBackupCount) {
-        // ترتيب الملفات حسب تاريخ التعديل (الأقدم أولاً)
-        files.sort(
-          (a, b) => a.statSync().modified.compareTo(b.statSync().modified),
-        );
+        // قراءة إحصائيات الملفات (تاريخ التعديل) بدون تجميد الـ UI
+        List<Map<String, dynamic>> fileStats = [];
+        for (var file in files) {
+          FileStat stat = await file.stat();
+          fileStats.add({'file': file, 'date': stat.modified});
+        }
 
-        // حساب كم ملف يجب حذفه
-        int filesToDeleteCount = files.length - maxBackupCount;
+        // ترتيب من الأقدم للأحدث
+        fileStats.sort((a, b) => a['date'].compareTo(b['date']));
 
-        for (int i = 0; i < filesToDeleteCount; i++) {
-          print("Deleting old backup: ${files[i].path}");
-          await files[i].delete();
+        int toDelete = fileStats.length - maxBackupCount;
+        for (int i = 0; i < toDelete; i++) {
+          await (fileStats[i]['file'] as FileSystemEntity).delete();
         }
       }
     } catch (e) {
-      print("Error cleaning old backups: $e");
+      print("Cleaning error: $e");
     }
   }
 

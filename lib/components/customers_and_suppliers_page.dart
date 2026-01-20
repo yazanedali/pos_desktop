@@ -6,6 +6,7 @@ import 'package:pos_desktop/dialogs/add_customer_dialog.dart';
 import 'package:pos_desktop/dialogs/customer_dialog.dart';
 import 'package:pos_desktop/dialogs/customer_statement_dialog.dart';
 import 'package:pos_desktop/dialogs/supplier_dialog.dart';
+import 'package:pos_desktop/dialogs/supplier_statement_dialog.dart';
 import 'package:pos_desktop/models/cash_movement.dart';
 import 'package:pos_desktop/models/debtor_info.dart';
 import 'package:pos_desktop/models/supplier.dart';
@@ -1233,6 +1234,13 @@ class _SuppliersTabState extends State<SuppliersTab> {
     );
   }
 
+  Future<void> _showSupplierStatement(Supplier supplier) async {
+    showDialog(
+      context: context,
+      builder: (context) => SupplierStatementDialog(supplier: supplier),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1469,6 +1477,15 @@ class _SuppliersTabState extends State<SuppliersTab> {
                           const SizedBox(width: 8),
 
                           // Actions (بدون Column)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.receipt_long,
+                              color: Colors.orange,
+                              size: 20,
+                            ),
+                            tooltip: "كشف حساب",
+                            onPressed: () => _showSupplierStatement(supplier),
+                          ),
                           IconButton(
                             icon: const Icon(
                               Icons.payment,

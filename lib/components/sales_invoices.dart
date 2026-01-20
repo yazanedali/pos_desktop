@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/sales_invoice.dart';
 import '../services/sales_invoice_service.dart';
+import '../services/printing_service.dart';
 import './sales_invoices/invoice_card.dart';
 import './sales_invoices/invoice_details_dialog.dart';
 import './sales_invoices/empty_state.dart';
@@ -161,11 +162,24 @@ class _SalesInvoicesState extends State<SalesInvoices> {
     );
   }
 
-  void _printInvoice(SaleInvoice invoice) {
-    TopAlert.showSuccess(
-      context: context,
-      message: 'تم إرسال فاتورة ${invoice.invoiceNumber} للطباعة',
-    );
+  Future<void> _printInvoice(SaleInvoice invoice) async {
+    try {
+      await PrintingService().printInvoice(invoice);
+
+      if (mounted) {
+        TopAlert.showSuccess(
+          context: context,
+          message: 'تم إرسال فاتورة ${invoice.invoiceNumber} للطباعة',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        TopAlert.showError(
+          context: context,
+          message: 'حدث خطأ أثناء الطباعة: $e',
+        );
+      }
+    }
   }
 
   // ⬅️ دالة محدثة لتحديث البيانات
