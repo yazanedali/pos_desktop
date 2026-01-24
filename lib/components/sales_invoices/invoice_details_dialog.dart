@@ -1,5 +1,6 @@
 // في invoice_details_dialog.dart - تحديث الكود
 import 'package:flutter/material.dart';
+
 import 'package:pos_desktop/dialogs/invoice_edit_dialog.dart';
 import '../../models/sales_invoice.dart';
 
@@ -242,17 +243,19 @@ class _InvoiceDetailsDialogState extends State<InvoiceDetailsDialog> {
         ),
         actions: [
           OutlinedButton(onPressed: widget.onClose, child: const Text("إغلاق")),
-          ElevatedButton.icon(
-            onPressed: () {
-              _showEditDialog(context);
-            },
-            icon: const Icon(Icons.edit),
-            label: const Text("تعديل الفاتورة"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
+          if (!widget.invoice.isReturn &&
+              widget.invoice.paymentStatus != 'تم الإرجاع')
+            ElevatedButton.icon(
+              onPressed: () {
+                _showEditDialog(context);
+              },
+              icon: const Icon(Icons.edit),
+              label: const Text("تعديل الفاتورة"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
             ),
-          ),
           ElevatedButton.icon(
             onPressed: widget.onPrint,
             icon: const Icon(Icons.print_outlined),

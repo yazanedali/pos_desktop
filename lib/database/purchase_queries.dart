@@ -1,6 +1,7 @@
 import 'package:pos_desktop/database/database_helper.dart';
 import 'package:pos_desktop/database/product_queries.dart';
 import 'package:pos_desktop/models/purchase_invoice.dart';
+import 'package:pos_desktop/services/stock_alert_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 class PurchaseQueries {
@@ -167,6 +168,9 @@ class PurchaseQueries {
       }
     });
 
+    // تحديث تنبيهات المخزون بعد إضافة الفاتورة
+    StockAlertService().checkAlerts();
+
     return invoice;
   }
 
@@ -321,6 +325,9 @@ class PurchaseQueries {
         }
       }
     });
+
+    // تحديث تنبيهات المخزون بعد تعديل الفاتورة
+    StockAlertService().checkAlerts();
   }
 
   // في purchase_queries.dart
@@ -381,6 +388,9 @@ class PurchaseQueries {
       // حذف الفاتورة والعناصر
       await txn.delete('purchase_invoices', where: 'id = ?', whereArgs: [id]);
     });
+
+    // تحديث تنبيهات المخزون بعد حذف الفاتورة
+    StockAlertService().checkAlerts();
   }
 
   // ========== دالة الحصول على فواتير الشراء مع فلترة (محدثة) ==========

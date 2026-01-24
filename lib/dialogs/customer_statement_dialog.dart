@@ -2,8 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/models/customer.dart';
 import 'package:pos_desktop/services/sales_invoice_service.dart';
-import 'package:pos_desktop/models/sales_invoice.dart';
-import 'package:pos_desktop/widgets/top_alert.dart';
+import 'package:pos_desktop/services/printing_service.dart';
+import 'package:pos_desktop/models/statement_item.dart';
+import 'invoice_details_dialog.dart';
 
 class CustomerStatementDialog extends StatefulWidget {
   final Customer customer;
@@ -20,11 +21,14 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
   final TextEditingController _dateToController = TextEditingController();
   final SalesInvoiceService _invoiceService = SalesInvoiceService();
 
-  List<SaleInvoice> _invoices = [];
+  List<StatementItem> _statementItems = [];
   bool _isLoading = false;
+
+  // Statistics
   double _totalSales = 0.0;
   double _totalPaid = 0.0;
-  double _totalRemaining = 0.0;
+  double _finalBalance = 0.0;
+  int _invoiceCount = 0;
 
   @override
   void initState() {
@@ -52,31 +56,46 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
 
     setState(() {
       _isLoading = true;
-      _invoices = [];
+      _statementItems = [];
     });
 
     try {
-      final invoices = await _invoiceService.getCustomerStatement(
+      final items = await _invoiceService.getCustomerDetailedStatement(
         customerId: widget.customer.id!,
         startDate: _dateFromController.text,
         endDate: _dateToController.text,
       );
 
-      double totalSales = 0.0;
-      double totalPaid = 0.0;
-      double totalRemaining = 0.0;
+      double sales = 0;
+      double paid = 0;
+      int count = 0;
 
-      for (final invoice in invoices) {
-        totalSales += invoice.total;
-        totalPaid += invoice.paidAmount;
-        totalRemaining += invoice.remainingAmount;
+      for (var item in items) {
+        if (item.isReturn) {
+          // المرتجع يعتبر تخفيض للمبيعات أو زيادة في المدفوعات (حسب المنظور)
+          // هنا سنعتبره عملية عكسية للمبيعات
+          // لكن للعرض كإحصائيات:
+          // totalSales = Sum of invoices
+          // totalPaid = Sum of payments + Returns ?
+          // الأبسط: لا نجمع المرتجعات مع المبيعات.
+        } else if (!item.isCredit) {
+          // فاتورة مبيعات
+          if (item.type.contains("فاتورة")) {
+            sales += item.amount;
+            count++;
+          }
+        } else {
+          // سداد
+          paid += item.amount;
+        }
       }
 
       setState(() {
-        _invoices = invoices;
-        _totalSales = totalSales;
-        _totalPaid = totalPaid;
-        _totalRemaining = totalRemaining;
+        _statementItems = items;
+        _totalSales = sales;
+        _totalPaid = paid;
+        _finalBalance = items.isNotEmpty ? items.last.balance : 0.0;
+        _invoiceCount = count;
         _isLoading = false;
       });
     } catch (e) {
@@ -93,12 +112,23 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
     );
   }
 
-  void _printStatement() {
-    TopAlert.showSuccess(
-      // ignore: use_build_context_synchronously
-      context: context,
-      message: "تم إرسال كشف حساب ${widget.customer.name} للطباعة",
-    );
+  Future<void> _printStatement() async {
+    if (_statementItems.isEmpty) {
+      _showError("لا توجد بيانات للطباعة");
+      return;
+    }
+
+    try {
+      await PrintingService().printStatement(
+        title: "كشف حساب عميل تفصيلي",
+        entityName: widget.customer.name,
+        dateRange:
+            "من ${_dateFromController.text} إلى ${_dateToController.text}",
+        items: _statementItems,
+      );
+    } catch (e) {
+      _showError("حدث خطأ أثناء الطباعة: $e");
+    }
   }
 
   @override
@@ -120,7 +150,7 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
           ],
         ),
         content: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.95, // عرض أكبر
+          width: MediaQuery.of(context).size.width * 0.9,
           height: MediaQuery.of(context).size.height * 0.85,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -150,10 +180,10 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
               const SizedBox(height: 16),
 
               // الإحصائيات
-              if (_invoices.isNotEmpty) _buildStatistics(),
+              if (_statementItems.isNotEmpty) _buildStatistics(),
               const SizedBox(height: 16),
 
-              // قائمة الفواتير المفصلة
+              // قائمة البنود
               Expanded(child: _buildContentSection()),
             ],
           ),
@@ -163,7 +193,7 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('إغلاق'),
           ),
-          if (_invoices.isNotEmpty)
+          if (_statementItems.isNotEmpty)
             ElevatedButton.icon(
               onPressed: _printStatement,
               icon: const Icon(Icons.print),
@@ -251,12 +281,12 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_invoices.isEmpty && _dateFromController.text.isNotEmpty) {
+    if (_statementItems.isEmpty && _dateFromController.text.isNotEmpty) {
       return _buildEmptyState();
     }
 
-    if (_invoices.isNotEmpty) {
-      return _buildDetailedInvoicesList();
+    if (_statementItems.isNotEmpty) {
+      return _buildTransactionsList();
     }
 
     return const SizedBox();
@@ -270,23 +300,22 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
         child: Wrap(
           spacing: 12,
           runSpacing: 12,
+          alignment: WrapAlignment.center,
           children: [
-            _buildStatItem('إجمالي المبيعات', _totalSales, Colors.blue),
-            _buildStatItem('إجمالي المدفوع', _totalPaid, Colors.green),
+            _buildStatItem('إجمالي الفواتير', _totalSales, Colors.blue),
+            _buildStatItem('إجمالي السدادات', _totalPaid, Colors.green),
             _buildStatItem(
-              'إجمالي المتبقي',
-              _totalRemaining,
-              _totalRemaining > 0 ? Colors.orange : Colors.grey,
+              'الرصيد النهائي',
+              _finalBalance,
+              _finalBalance > 0
+                  ? Colors.red
+                  : Colors.green, // أحمر يعني عليه دين
             ),
             _buildStatItem(
-              'عدد الفواتير',
-              _invoices.length.toDouble(),
+              'عدد الحركات',
+              _invoiceCount.toDouble(),
               Colors.purple,
-            ),
-            _buildStatItem(
-              'إجمالي المنتجات',
-              _getTotalProductsCount().toDouble(),
-              Colors.teal,
+              isInteger: true,
             ),
           ],
         ),
@@ -294,17 +323,14 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
     );
   }
 
-  int _getTotalProductsCount() {
-    int total = 0;
-    for (final invoice in _invoices) {
-      total += invoice.items.length;
-    }
-    return total;
-  }
-
-  Widget _buildStatItem(String title, double value, Color color) {
+  Widget _buildStatItem(
+    String title,
+    double value,
+    Color color, {
+    bool isInteger = false,
+  }) {
     return Container(
-      width: 150,
+      width: 140,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
@@ -325,9 +351,7 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
           ),
           const SizedBox(height: 4),
           Text(
-            value % 1 == 0
-                ? value.toInt().toString()
-                : value.toStringAsFixed(2),
+            isInteger ? value.toInt().toString() : value.toStringAsFixed(2),
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
@@ -349,10 +373,10 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.receipt_long, size: 64, color: Colors.grey[400]),
+              Icon(Icons.history, size: 64, color: Colors.grey[400]),
               const SizedBox(height: 16),
               const Text(
-                'لا توجد فواتير في الفترة المحددة',
+                'لا توجد حركات في الفترة المحددة',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
             ],
@@ -362,349 +386,187 @@ class _CustomerStatementDialogState extends State<CustomerStatementDialog> {
     );
   }
 
-  Widget _buildDetailedInvoicesList() {
-    return ListView.builder(
-      shrinkWrap: true,
-      itemCount: _invoices.length,
-      itemBuilder: (context, index) {
-        final invoice = _invoices[index];
-        return _buildDetailedInvoiceItem(invoice);
-      },
-    );
-  }
-
-  Widget _buildDetailedInvoiceItem(SaleInvoice invoice) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // رأس الفاتورة
-            _buildInvoiceHeader(invoice),
-            const SizedBox(height: 16),
-
-            // جدول المنتجات
-            _buildProductsTable(invoice.items),
-            const SizedBox(height: 16),
-
-            // ملخص الفاتورة
-            _buildInvoiceSummary(invoice),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInvoiceHeader(SaleInvoice invoice) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blue[50],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.receipt, color: Colors.blue[700]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'فاتورة رقم: ${invoice.invoiceNumber}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.blue,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'التاريخ: ${invoice.date} - الوقت: ${invoice.time}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                Text(
-                  'الكاشير: ${invoice.cashier}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: _getStatusColor(invoice.paymentStatus),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              invoice.paymentStatus,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductsTable(List<SaleInvoiceItem> items) {
+  Widget _buildTransactionsList() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'المنتجات المشتراة:',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
+        // Header Row
         Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey[300]!),
-            borderRadius: BorderRadius.circular(8),
+            color: Colors.grey[200],
+            border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
           ),
-          child: Column(
+          child: const Row(
             children: [
-              // رأس الجدول
-              Container(
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'التاريخ',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  'البيان',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'مدين (عليه)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'دائن (له)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'الرصيد',
+                  textAlign: TextAlign.end,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // List
+        Expanded(
+          child: ListView.separated(
+            itemCount: _statementItems.length,
+            separatorBuilder: (context, index) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final item = _statementItems[index];
+              final bool isDebit = !item.isCredit && !item.isReturn; // فاتورة
+              final bool isCredit =
+                  item.isCredit || item.isReturn; // سداد أو مرتجع
+
+              return Container(
+                color:
+                    index % 2 == 0
+                        ? Colors.white
+                        : Colors.grey[50], // Striped rows
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
+                  vertical: 12,
+                  horizontal: 8,
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(8),
-                    topRight: Radius.circular(8),
-                  ),
-                ),
-                child: const Row(
+                child: Row(
                   children: [
+                    // Date
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.date, style: const TextStyle(fontSize: 12)),
+                          if (item.invoiceNumber != null)
+                            Text(
+                              "#${item.invoiceNumber}",
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Description
                     Expanded(
                       flex: 3,
-                      child: Text(
-                        'اسم المنتج',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'الوحدة',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'السعر',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'الكمية',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'الإجمالي',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.end,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // جسم الجدول
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      border:
-                          index < items.length - 1
-                              ? Border(
-                                bottom: BorderSide(color: Colors.grey[200]!),
-                              )
-                              : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            item.productName,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            item.unitName,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            '${item.price.toStringAsFixed(2)}',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            '${item.quantity.toStringAsFixed(2)}',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            '${item.total.toStringAsFixed(2)} شيكل',
-                            textAlign: TextAlign.end,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.type,
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: Colors.blue,
                             ),
                           ),
-                        ),
-                      ],
+                          if (item.description.isNotEmpty)
+                            Text(
+                              item.description,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[700],
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
                     ),
-                  );
-                },
-              ),
-            ],
+                    // Debit (Invoice Amount)
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        isDebit ? item.amount.toStringAsFixed(2) : "-",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    // Credit (Payment Amount)
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        isCredit ? item.amount.toStringAsFixed(2) : "-",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ),
+                    // Balance
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        item.balance.toStringAsFixed(2),
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: item.balance > 0 ? Colors.red : Colors.green,
+                        ),
+                      ),
+                    ),
+                    // Actions
+                    if (isDebit && item.items != null && item.items!.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.receipt_long,
+                          size: 20,
+                          color: Colors.blue,
+                        ),
+                        tooltip: "تفاصيل الفاتورة",
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => InvoiceDetailsDialog(item: item),
+                          );
+                        },
+                      )
+                    else
+                      const SizedBox(width: 48), // Spacing placeholder
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ],
     );
-  }
-
-  Widget _buildInvoiceSummary(SaleInvoice invoice) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'عدد المنتجات: ${invoice.items.length}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'طريقة الدفع: ${invoice.paymentMethod}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Row(
-                children: [
-                  const Text(
-                    'المبلغ الإجمالي:',
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${invoice.total.toStringAsFixed(2)} شيكل',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Text(
-                    'المبلغ المدفوع:',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          invoice.paidAmount == invoice.total
-                              ? Colors.green
-                              : Colors.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${invoice.paidAmount.toStringAsFixed(2)} شيكل',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color:
-                          invoice.paidAmount == invoice.total
-                              ? Colors.green
-                              : Colors.orange,
-                    ),
-                  ),
-                ],
-              ),
-              if (invoice.remainingAmount > 0) ...[
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const Text(
-                      'المبلغ المتبقي:',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${invoice.remainingAmount.toStringAsFixed(2)} شيكل',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'مدفوع':
-        return Colors.green;
-      case 'جزئي':
-        return Colors.orange;
-      case 'غير مدفوع':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
   }
 }

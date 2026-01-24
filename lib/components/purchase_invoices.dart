@@ -6,6 +6,7 @@ import 'purchase_invoice_details_dialog.dart';
 import '../database/purchase_queries.dart';
 import '../database/category_queries.dart';
 import '../services/cash_service.dart';
+import '../services/printing_service.dart';
 import '../widgets/top_alert.dart';
 
 class PurchaseInvoices extends StatefulWidget {
@@ -278,6 +279,10 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
             invoice: invoice,
             categories: _categories,
             onClose: () => Navigator.of(context).pop(),
+            onPrint: () {
+              PrintingService().printPurchaseInvoice(invoice);
+              Navigator.of(context).pop();
+            },
           ),
     );
   }

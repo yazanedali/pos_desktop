@@ -2,7 +2,9 @@
 import 'package:pos_desktop/database/database_helper.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/sales_invoice.dart';
+import '../models/statement_item.dart';
 import 'dart:math';
+import 'package:pos_desktop/services/stock_alert_service.dart';
 
 class SalesInvoiceService {
   final DatabaseHelper _dbHelper = DatabaseHelper();
@@ -41,6 +43,8 @@ class SalesInvoiceService {
             originalTotal: invoice.originalTotal,
             notes: invoice.notes,
             createdAt: invoice.createdAt,
+            isReturn: invoice.isReturn,
+            parentInvoiceId: invoice.parentInvoiceId,
             items: items,
           ),
         );
@@ -97,6 +101,8 @@ class SalesInvoiceService {
         originalTotal: invoice.originalTotal,
         notes: invoice.notes,
         createdAt: invoice.createdAt,
+        isReturn: invoice.isReturn,
+        parentInvoiceId: invoice.parentInvoiceId,
         items: items,
       );
     } catch (e) {
@@ -162,6 +168,8 @@ class SalesInvoiceService {
             originalTotal: invoice.originalTotal,
             notes: invoice.notes,
             createdAt: invoice.createdAt,
+            isReturn: invoice.isReturn,
+            parentInvoiceId: invoice.parentInvoiceId,
             items: items,
           ),
         );
@@ -392,6 +400,8 @@ class SalesInvoiceService {
             originalTotal: invoice.originalTotal,
             notes: invoice.notes,
             createdAt: invoice.createdAt,
+            isReturn: invoice.isReturn,
+            parentInvoiceId: invoice.parentInvoiceId,
             items: items,
           ),
         );
@@ -497,6 +507,7 @@ class SalesInvoiceService {
         'payment_status': finalPaymentStatus,
         'original_total': originalTotal ?? total,
         'created_at': DateTime.now().toIso8601String(),
+        'is_return': 0, // Not a return
       };
 
       // نظف البيانات
@@ -611,6 +622,9 @@ class SalesInvoiceService {
     final invoice = SaleInvoice.fromMap(savedInvoice);
     final itemsFromDb = await getInvoiceItems(invoice.id!);
 
+    // تحديث التنبيهات بعد البيع
+    StockAlertService().checkAlerts();
+
     return SaleInvoice(
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
@@ -627,6 +641,8 @@ class SalesInvoiceService {
       originalTotal: invoice.originalTotal,
       notes: invoice.notes,
       createdAt: invoice.createdAt,
+      isReturn: invoice.isReturn,
+      parentInvoiceId: invoice.parentInvoiceId,
       items: itemsFromDb,
     );
   }
@@ -788,12 +804,13 @@ class SalesInvoiceService {
 
   //ارجاع فاتورة
   // ارجاع فاتورة بالكامل مع خصم المبلغ من الصندوق اليومي
-  Future<bool> returnInvoice(int invoiceId) async {
+  // إرجاع الفاتورة (إنشاء فاتورة مرتجع)
+  Future<bool> createReturnInvoice(int invoiceId) async {
     final db = await _dbHelper.database;
 
     try {
       await db.transaction((txn) async {
-        // 1. جلب بيانات الفاتورة
+        // 1. جلب بيانات الفاتورة الأصلية
         final invoiceList = await txn.query(
           'sales_invoices',
           where: 'id = ?',
@@ -804,32 +821,45 @@ class SalesInvoiceService {
           throw Exception('الفاتورة غير موجودة');
         }
 
-        final invoiceData = invoiceList.first;
-        final double paidAmount =
-            (invoiceData['paid_amount'] as num).toDouble();
-        final String paymentMethod = invoiceData['payment_method'] as String;
-        final String invoiceNumber = invoiceData['invoice_number'] as String;
+        final originalInvoice = invoiceList.first;
 
-        // 🌟 فحص الصندوق والخصم (فقط إذا كان هناك مبلغ مدفوع وطريقة الدفع ليست من الرصيد)
-        if (paidAmount > 0 && paymentMethod != 'من الرصيد') {
-          await _processRefundFromDailyBox(
-            txn,
-            amount: paidAmount,
-            description: 'إرجاع فاتورة مبيعات رقم $invoiceNumber بالكامل',
-            relatedId: invoiceId,
-          );
-        } else if (paidAmount > 0 && paymentMethod == 'من الرصيد') {
-          // إذا كان الدفع من الرصيد، يجب إعادة المبلغ لمحفظة العميل (اختياري حسب نظامك)
-          final customerId = invoiceData['customer_id'] as int?;
-          if (customerId != null) {
-            await txn.rawUpdate(
-              'UPDATE customers SET wallet_balance = wallet_balance + ? WHERE id = ?',
-              [paidAmount, customerId],
-            );
-          }
+        // التحقق من أنها ليست مرتجعة بالفعل
+        if ((originalInvoice['is_return'] as int?) == 1) {
+          throw Exception('لا يمكن إرجاع فاتورة مرتجعة أصلاً');
         }
 
-        // 2. إرجاع المخزون للمنتجات (الكود القديم)
+        final String originalInvoiceNumber =
+            originalInvoice['invoice_number'] as String;
+        final double total = (originalInvoice['total'] as num).toDouble();
+        final double paidAmount =
+            (originalInvoice['paid_amount'] as num).toDouble();
+        final String paymentMethod =
+            originalInvoice['payment_method'] as String;
+        final int? customerId = originalInvoice['customer_id'] as int?;
+
+        // 2. إنشاء فاتورة مرتجع جديدة
+        final newInvoiceNumber = 'RET-$originalInvoiceNumber';
+
+        // تخزين القيم بالسالب لضمان صحة الحسابات والتجميع
+        final returnInvoiceId = await txn.insert('sales_invoices', {
+          'invoice_number': newInvoiceNumber,
+          'date': DateTime.now().toString().split(' ')[0],
+          'time': DateTime.now().toString().split(' ')[1].substring(0, 8),
+          'total': -total, // ⬅️ سالب
+          'paid_amount': -paidAmount, // ⬅️ سالب
+          'remaining_amount': 0.0,
+          'cashier': originalInvoice['cashier'],
+          'customer_id': customerId,
+          'customer_name': originalInvoice['customer_name'],
+          'payment_method': paymentMethod,
+          'payment_status': 'مرتجع',
+          'original_total': -total, // ⬅️ سالب
+          'is_return': 1,
+          'parent_invoice_id': invoiceId,
+          'notes': 'مرتجع للفاتورة $originalInvoiceNumber',
+        });
+
+        // 3. نسخ العناصر للفاتورة الجديدة + إعادة المخزون
         final items = await txn.query(
           'sales_invoice_items',
           where: 'invoice_id = ?',
@@ -837,45 +867,70 @@ class SalesInvoiceService {
         );
 
         for (final item in items) {
-          final productId = item['product_id'] as int;
-          final quantity = (item['quantity'] as num).toDouble();
-          final unitQuantity =
+          final double quantity = (item['quantity'] as num).toDouble();
+          final double unitQuantity =
               (item['unit_quantity'] as num?)?.toDouble() ?? 1.0;
+          final int? productId = item['product_id'] as int?;
 
-          final totalQuantity = quantity * unitQuantity;
+          // نسخ العنصر لفاتورة المرتجع مع قيم سالبة
+          await txn.insert('sales_invoice_items', {
+            'invoice_id': returnInvoiceId,
+            'product_id': productId,
+            'product_name': item['product_name'],
+            'price': item['price'],
+            'quantity': -quantity, // ⬅️ كمية سالبة
+            'total': -(item['total'] as num).toDouble(), // ⬅️ إجمالي سالب
+            'unit_quantity': unitQuantity,
+            'unit_name': item['unit_name'],
+            'cost_price': item['cost_price'],
+          });
 
-          await txn.rawUpdate(
-            '''
-          UPDATE products 
-          SET stock = stock + ?, 
-              updated_at = CURRENT_TIMESTAMP 
-          WHERE id = ?
-          ''',
-            [totalQuantity, productId],
-          );
+          // إعادة المخزون (إضافة الكمية الموجبة للمخزون)
+          if (productId != null) {
+            final totalQuantity = quantity * unitQuantity;
+            await txn.rawUpdate(
+              'UPDATE products SET stock = stock + ? WHERE id = ?',
+              [totalQuantity, productId],
+            );
+          }
         }
 
-        // 3. حذف سجلات السداد المرتبطة بالفاتورة
-        await txn.delete(
-          'payment_records',
-          where: 'invoice_id = ?',
-          whereArgs: [invoiceId],
-        );
+        // 4. معالجة المال (إرجاع كاش أو تخفيض ديون)
+        if (paidAmount > 0) {
+          if (paymentMethod != 'من الرصيد') {
+            // إخراج كاش من الصندوق (Refund)
+            // ملاحظة: نستخدم القيمة الموجبة هنا لأن دالة الصندوق تتوقع قيمة موجبة للسحب
+            await _processRefundFromDailyBox(
+              txn,
+              amount: paidAmount,
+              description: 'مرتجع مبيعات فاتورة $originalInvoiceNumber',
+              relatedId: returnInvoiceId,
+            );
+          } else {
+            // لو كان الدفع من الرصيد، نعيد الرصيد للمحفظة
+            if (customerId != null) {
+              await txn.rawUpdate(
+                'UPDATE customers SET wallet_balance = wallet_balance + ? WHERE id = ?',
+                [paidAmount, customerId],
+              );
+            }
+          }
+        }
 
-        // 4. حذف عناصر الفاتورة
-        await txn.delete(
-          'sales_invoice_items',
-          where: 'invoice_id = ?',
-          whereArgs: [invoiceId],
-        );
-
-        // 5. حذف الفاتورة الرئيسية
-        await txn.delete(
+        // تحديث حالة الفاتورة الأصلية
+        await txn.update(
           'sales_invoices',
+          {
+            'payment_status': 'تم الإرجاع',
+            'notes': 'تم إرجاعها بالفاتورة $newInvoiceNumber',
+          },
           where: 'id = ?',
           whereArgs: [invoiceId],
         );
       });
+
+      // تحديث التنبيهات بعد الإرجاع
+      StockAlertService().checkAlerts();
 
       return true;
     } catch (e) {
@@ -1557,5 +1612,285 @@ class SalesInvoiceService {
       'related_id': relatedId.toString(),
       'created_at': now.toIso8601String(),
     });
+  }
+
+  // معالجة عملية الإرجاع
+  Future<void> processReturn({
+    required int parentInvoiceId,
+    required List<SaleInvoiceItem> itemsToReturn,
+    required double returnTotal,
+    required bool returnToCash, // هل نرجع كاش؟
+  }) async {
+    final db = await _dbHelper.database;
+
+    await db.transaction((txn) async {
+      // 1. جلب الفاتورة الأصلية
+      final parentInvoiceData = await txn.query(
+        'sales_invoices',
+        where: 'id = ?',
+        whereArgs: [parentInvoiceId],
+      );
+      if (parentInvoiceData.isEmpty)
+        throw Exception('الفاتورة الأصلية غير موجودة');
+      final parentInvoice = SaleInvoice.fromMap(parentInvoiceData.first);
+
+      // 2. إنشاء فاتورة المرتجع (قيم سالبة)
+      final returnInvoiceNumber =
+          'RET-${parentInvoice.invoiceNumber}-${DateTime.now().millisecondsSinceEpoch.toString().substring(10)}';
+
+      // إذا كان الدفع كاش، المرتجع أيضاً كاش (PaidAmount سالب)
+      // إذا كان خصم من الدين، PaidAmount صفر (ويبقيRemainingAmount سالب يخصم من الدين الكلي)
+      final double paidAmount = returnToCash ? -returnTotal : 0.0;
+      final double remainingAmount = returnToCash ? 0.0 : -returnTotal;
+
+      final invoiceId = await txn.insert('sales_invoices', {
+        'invoice_number': returnInvoiceNumber,
+        'date': DateTime.now().toString().split(' ')[0],
+        'time':
+            '${DateTime.now().hour}:${DateTime.now().minute}:${DateTime.now().second}',
+        'total': -returnTotal, // الإجمالي بالسالب
+        'paid_amount': paidAmount,
+        'remaining_amount': remainingAmount,
+        'cashier': parentInvoice.cashier,
+        'customer_id': parentInvoice.customerId,
+        'customer_name': parentInvoice.customerName,
+        'payment_method': returnToCash ? 'نقدي' : 'تعديل رصيد',
+        'payment_type': 'مرتجع',
+        'payment_status': 'مرتجع',
+        'original_total': -returnTotal,
+        'notes': 'مرتجع للفاتورة ${parentInvoice.invoiceNumber}',
+        'created_at': DateTime.now().toIso8601String(),
+        'is_return': 1,
+        'parent_invoice_id': parentInvoiceId,
+      });
+
+      // 3. إدخال العناصر ومعالجة المخزون (زيادة المخزون)
+      for (var item in itemsToReturn) {
+        await txn.insert('sales_invoice_items', {
+          'invoice_id': invoiceId,
+          'product_id': item.productId,
+          'product_name': item.productName,
+          'price': item.price,
+          'quantity': -item.quantity,
+          'total': -item.total,
+          'unit_quantity': item.unitQuantity,
+          'unit_name': item.unitName,
+          'cost_price': item.costPrice,
+        });
+
+        // زيادة المخزون
+        if (item.productId != null) {
+          final totalQty = item.quantity * item.unitQuantity;
+          await txn.rawUpdate(
+            'UPDATE products SET stock = stock + ? WHERE id = ?',
+            [totalQty, item.productId],
+          );
+        }
+      }
+
+      // 4. معالجة حساب العميل/الصندوق
+      if (returnToCash) {
+        // نخصم من الصندوق اليومي إذا كان الدفع كاش
+        await _processRefundFromDailyBox(
+          txn,
+          amount: returnTotal,
+          description:
+              'مرتجع كامل/جزئي للفاتورة ${parentInvoice.invoiceNumber}',
+          relatedId: invoiceId,
+        );
+      } else {
+        // إذا كان تعديل رصيد، النظام سيعالج ذلك تلقائياً عبر جمع الفواتير
+      }
+    });
+  }
+
+  // 5. جلب كشف حساب مفصل (فواتير، مرتجعات، سدادات)
+  Future<List<StatementItem>> getCustomerDetailedStatement({
+    required int customerId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final db = await _dbHelper.database;
+    final List<StatementItem> statementItems = [];
+    double runningBalance = 0.0;
+
+    try {
+      // 1. حساب الرصيد الافتتاحي (قبل تاريخ البداية)
+
+      // أ. الديون الحالية للفواتير التي أنشئت قبل تاريخ البداية
+      // (نعتمد على remaining_amount الحالي للفواتير القديمة)
+      final oldInvoicesDebtResult = await db.rawQuery(
+        'SELECT SUM(remaining_amount) as debt FROM sales_invoices WHERE customer_id = ? AND date < ?',
+        [customerId, startDate],
+      );
+      double openingBalance =
+          (oldInvoicesDebtResult.first['debt'] as num?)?.toDouble() ?? 0.0;
+
+      // ب. السدادات التي تمت في فترة التقرير (أو بعدها) ولكنها تخص فواتير قديمة (قبل التقرير)
+      // هذه السدادات خفضت الـ remaining_amount، ما يعني أن الدين كان أكبر في بداية الفترة.
+      // لذا يجب إعادة إضافتها للرصيد الافتتاحي لنتمكن من خصمها مجدداً عند عرض حركة السداد.
+      final paymentsForOldInvoicesResult = await db.rawQuery(
+        '''
+        SELECT SUM(pr.amount) as paid
+        FROM payment_records pr
+        JOIN sales_invoices si ON pr.invoice_id = si.id
+        WHERE si.customer_id = ? 
+          AND si.date < ?       -- الفاتورة قديمة (قبل بداية التقرير)
+          AND pr.payment_date >= ? -- السداد حديث (داخل فترة التقرير أو بعدها)
+        ''',
+        [customerId, startDate, startDate],
+      );
+      double paidForOldInSales =
+          (paymentsForOldInvoicesResult.first['paid'] as num?)?.toDouble() ??
+          0.0;
+
+      runningBalance = openingBalance + paidForOldInSales;
+
+      // إضافة بند الرصيد الافتتاحي
+      if (runningBalance != 0) {
+        statementItems.add(
+          StatementItem(
+            date: startDate,
+            type: "رصيد سابق",
+            description: "رصيد افتتاحي ما قبل $startDate",
+            amount: runningBalance,
+            balance: runningBalance,
+            isCredit: false,
+          ),
+        );
+      }
+
+      // 2. جلب العمليات في الفترة (فواتير + سدادات)
+      final List<StatementItem> periodItems = [];
+
+      // أ. الفواتير (مبيعات + مرتجعات) في الفترة
+      final invoices = await db.query(
+        'sales_invoices',
+        where: 'customer_id = ? AND date BETWEEN ? AND ?',
+        whereArgs: [customerId, startDate, endDate],
+      );
+
+      for (var inv in invoices) {
+        final invoice = SaleInvoice.fromMap(inv);
+        bool isRet = invoice.isReturn == 1;
+
+        // Fetch invoice items from DB
+        final itemsData = await db.query(
+          'sales_invoice_items',
+          where: 'invoice_id = ?',
+          whereArgs: [invoice.id],
+        );
+
+        final List<SaleInvoiceItem> loadedItems =
+            itemsData
+                .map((itemMap) => SaleInvoiceItem.fromMap(itemMap))
+                .toList();
+
+        // إضافة الفاتورة كحركة
+        periodItems.add(
+          StatementItem(
+            date: "${invoice.date} ${invoice.time}",
+            invoiceNumber: invoice.invoiceNumber,
+            type: isRet ? "مرتجع مبيعات" : "فاتورة مبيعات",
+            description:
+                isRet
+                    ? "مرتجع رقم ${invoice.invoiceNumber}"
+                    : "فاتورة رقم ${invoice.invoiceNumber}",
+            amount: invoice.total.abs(), // القيمة الموجبة دائماً للعرض
+            balance: 0, // سيحسب لاحقاً
+            isCredit: false, // تعامل معاملة المدين (زيادة على الحساب) مبدئياً
+            isReturn: isRet, // المرتجع حالة خاصة ستعالج في الحساب
+            items: loadedItems,
+          ),
+        );
+
+        // التحقق من "الدفع الفوري" (النقدي) غير المسجل في PaymentRecords
+        // نقوم بحساب المبلغ المدفوع الكلي في الفاتورة ونطرح منه أي سدادات مسجلة في جدول payment_records
+        final records = await db.query(
+          'payment_records',
+          where: 'invoice_id = ?',
+          whereArgs: [invoice.id],
+        );
+        double recordedPaid = 0;
+        for (var r in records) recordedPaid += (r['amount'] as num).toDouble();
+
+        double instantPay = invoice.paidAmount - recordedPaid;
+        // معالجة فروقات صغيرة في الأرقام العائمة
+        if (instantPay < 0.01 && instantPay > -0.01) instantPay = 0;
+
+        if (instantPay > 0) {
+          periodItems.add(
+            StatementItem(
+              date: "${invoice.date} ${invoice.time}",
+              type: "دفعة فورية",
+              description: "دفعة نقدية عن فاتورة ${invoice.invoiceNumber}",
+              amount: instantPay,
+              balance: 0,
+              isCredit: true, // سداد (ينقص الدين)
+            ),
+          );
+        }
+      }
+
+      // ب. السدادات (Payment Records) المسجلة في الفترة
+      final payments = await db.rawQuery(
+        '''
+        SELECT pr.*, si.invoice_number 
+        FROM payment_records pr
+        JOIN sales_invoices si ON pr.invoice_id = si.id
+        WHERE si.customer_id = ? AND pr.payment_date BETWEEN ? AND ?
+        ''',
+        [customerId, startDate, endDate],
+      );
+
+      for (var pay in payments) {
+        periodItems.add(
+          StatementItem(
+            date: "${pay['payment_date']} ${pay['payment_time']}",
+            invoiceNumber: (pay['invoice_number'] as String?) ?? "",
+            type: "سند قبض",
+            description:
+                "سداد ورقي عن فاتورة ${(pay['invoice_number'] as String?) ?? ''}",
+            amount: (pay['amount'] as num).toDouble(),
+            balance: 0,
+            isCredit: true,
+          ),
+        );
+      }
+
+      // 3. ترتيب الكل حسب التاريخ والوقت
+      periodItems.sort((a, b) => a.date.compareTo(b.date));
+
+      // 4. دمج وحساب الرصيد التراكمي
+      for (var item in periodItems) {
+        if (item.isReturn) {
+          // المرتجع ينقص الرصيد (لأنه دائن للعميل)
+          runningBalance -= item.amount;
+        } else if (item.isCredit) {
+          // سداد ينقص الرصيد
+          runningBalance -= item.amount;
+        } else {
+          // فاتورة مبيعات تزيد الرصيد (مدين)
+          runningBalance += item.amount;
+        }
+
+        statementItems.add(
+          StatementItem(
+            date: item.date,
+            invoiceNumber: item.invoiceNumber,
+            type: item.type,
+            description: item.description,
+            amount: item.amount,
+            balance: runningBalance,
+            isCredit: item.isCredit,
+            isReturn: item.isReturn,
+          ),
+        );
+      }
+    } catch (e) {
+      print("Error calculating statement: $e");
+    }
+
+    return statementItems;
   }
 }

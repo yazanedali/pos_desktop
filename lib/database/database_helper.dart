@@ -30,7 +30,10 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 11, // changed from 9 to 10
+      version: 14, // changed from 13 to 14 for performance indexes
+      onConfigure: (db) async {
+        await db.execute('PRAGMA journal_mode=WAL;');
+      },
       onCreate: _createDatabase,
       onUpgrade: (db, oldVersion, newVersion) async {
         // Migration path: v2 -> v3 add product_barcodes table
@@ -338,6 +341,81 @@ class DatabaseHelper {
             );
           } catch (e) {}
         }
+        // Migration path: v11 -> v12 (New Features: Stock Alerts, Returns, Shift Closing)
+        if (oldVersion < 12) {
+          // 1. Stock Alerts: Add min_stock to products
+          try {
+            await db.execute(
+              "ALTER TABLE products ADD COLUMN min_stock REAL DEFAULT 0",
+            );
+          } catch (e) {
+            // Column might already exist
+          }
+
+          // 2. Returns: Add fields to sales_invoices
+          try {
+            await db.execute(
+              "ALTER TABLE sales_invoices ADD COLUMN is_return INTEGER DEFAULT 0",
+            );
+            await db.execute(
+              "ALTER TABLE sales_invoices ADD COLUMN parent_invoice_id INTEGER",
+            );
+          } catch (e) {
+            // Columns might already exist
+          }
+
+          // 3. Shift Closing: Create daily_closings table
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS daily_closings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              closing_date TEXT NOT NULL, -- Date string YYYY-MM-DD
+              closing_time TEXT NOT NULL, -- Time string HH:MM:SS
+              cashier_name TEXT,
+              opening_cash REAL DEFAULT 0,
+              total_sales_cash REAL DEFAULT 0, -- Cash sales in this shift
+              total_expenses REAL DEFAULT 0,
+              total_debt_collected REAL DEFAULT 0, -- Debt payments collected
+              expected_cash REAL DEFAULT 0, -- Calculated
+              actual_cash REAL DEFAULT 0, -- Input by user
+              difference REAL DEFAULT 0,
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        ''');
+        }
+
+        // Migration path: v12 -> v13 (Default Min Stock 9)
+        if (oldVersion < 13) {
+          // تحديث الحد الأدنى للمخزون لكل المنتجات ليصبح 9 (حسب طلب المستخدم)
+          // نطبق هذا التغيير على المنتجات التي ليس لها قيمة محددة (0)
+          await db.rawUpdate(
+            'UPDATE products SET min_stock = 9 WHERE min_stock IS NULL OR min_stock = 0',
+          );
+        }
+
+        // Migration path: v13 -> v14 (Performance Indexes for Stock Alerts)
+        if (oldVersion < 14) {
+          // إضافة Indexes لتحسين أداء استعلامات تنبيهات المخزون
+          // Index مركب على (is_active, stock, min_stock) لتسريع استعلام getLowStockCount
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_products_stock_alert 
+            ON products(is_active, stock, min_stock)
+          ''');
+
+          // Index على stock فقط لاستعلامات أخرى
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_products_stock 
+            ON products(stock)
+          ''');
+
+          // Index على category_id لتسريع الفلترة حسب الفئة
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_products_category 
+            ON products(category_id)
+          ''');
+
+          print('✅ Performance indexes created successfully');
+        }
       },
     );
 
@@ -383,6 +461,7 @@ class DatabaseHelper {
         stock REAL DEFAULT 0,
         barcode TEXT UNIQUE,
         category_id INTEGER,
+        min_stock REAL DEFAULT 9, -- Default to 9 as user request
         is_active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -600,6 +679,33 @@ class DatabaseHelper {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (box_id) REFERENCES cash_boxes (id)
       )
+    ''');
+
+    // ========== Performance Indexes ==========
+    // Indexes لتحسين أداء الاستعلامات الشائعة
+
+    // Index مركب لتنبيهات المخزون (يسرع استعلام getLowStockCount بشكل كبير)
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_stock_alert 
+      ON products(is_active, stock, min_stock)
+    ''');
+
+    // Index على stock لاستعلامات المخزون العامة
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_stock 
+      ON products(stock)
+    ''');
+
+    // Index على category_id لتسريع الفلترة حسب الفئة
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_category 
+      ON products(category_id)
+    ''');
+
+    // Index على name للبحث السريع بالاسم
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_name 
+      ON products(name)
     ''');
   }
 

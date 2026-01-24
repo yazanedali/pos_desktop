@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cron/cron.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
 import 'database_helper.dart';
 
 class BackupService {
@@ -16,12 +17,11 @@ class BackupService {
   }
 
   Future<String> createBackup({bool isAuto = false}) async {
+    File? tempBackupFile;
     try {
       final dbHelper = DatabaseHelper();
-      final String currentDbPath = await dbHelper.getDatabasePath();
-      final File dbFile = File(currentDbPath);
-
-      if (!await dbFile.exists()) return "قاعدة البيانات الأصلية غير موجودة";
+      // Ensure local DB is open
+      final db = await dbHelper.database;
 
       final String timestamp = DateFormat(
         'yyyy-MM-dd_HH-mm-ss',
@@ -29,39 +29,60 @@ class BackupService {
       final String fileName =
           '${isAuto ? 'auto' : 'manual'}_backup_$timestamp.db';
 
-      // --- التعديل هنا: مسار مباشر على الفلاشة بعيداً عن مجلدات الدرايف ---
-      // تأكد أن المسار لا يحتوي على "My Drive" أو أي اسم متعلق بجوجل درايف
+      // 1. Create a temporary backup on the fast local drive (C:)
+      // VACUUM INTO creates a transaction-consistent backup without long locks
+      final directory = await getApplicationDocumentsDirectory();
+      final String tempPath = join(directory.path, 'temp_$fileName');
+
+      await db.execute('VACUUM INTO ?', [tempPath]);
+
+      tempBackupFile = File(tempPath);
+
+      if (!await tempBackupFile.exists()) {
+        return "فشل إنشاء النسخة المؤقتة";
+      }
+
+      // 2. Define Flash Drive path
       final String backupDirPath = r'D:\POS_System_Backups';
       final String fullPath = join(backupDirPath, fileName);
-
       final Directory dir = Directory(backupDirPath);
 
-      // فحص وجود الفلاشة (D:)
+      // Check for Flash Drive
       if (!await Directory('D:\\').exists()) {
+        await tempBackupFile.delete();
         return "فشل: الفلاشة (القرص D) غير متصلة بالجهاز";
       }
 
-      // إنشاء المجلد إذا لم يكن موجوداً
+      // Create directory if needed
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
 
-      // عملية النسخ (Async) لضمان عدم توقف واجهة البيع
-      await dbFile.copy(fullPath);
+      // 3. Copy from Temp to Flash Drive
+      // This is the slow part, but it no longer locks the DB
+      await tempBackupFile.copy(fullPath);
 
-      // تنظيف النسخ القديمة
+      // 4. Clean up temp file
+      await tempBackupFile.delete();
+
+      // Clean old backups on Flash Drive
       await _cleanOldBackups(dir);
 
       return "تم النسخ بنجاح إلى الفلاشة";
     } catch (e) {
-      // في حال وجود خطأ (مثلاً الفلاشة محمية من الكتابة أو مفصولة)
-      return "خطأ في الوصول للفلاشة: $e";
+      // Clean up temp file on error
+      if (tempBackupFile != null && await tempBackupFile.exists()) {
+        try {
+          await tempBackupFile.delete();
+        } catch (_) {}
+      }
+      return "خطأ في عملية النسخ: $e";
     }
   }
 
   Future<void> _cleanOldBackups(Directory dir) async {
     try {
-      // جلب الملفات بشكل غير متزامن تماماً
+      // Get files asynchronously
       List<FileSystemEntity> files = [];
       await for (var entity in dir.list()) {
         if (entity.path.endsWith('.db')) {
@@ -70,14 +91,13 @@ class BackupService {
       }
 
       if (files.length > maxBackupCount) {
-        // قراءة إحصائيات الملفات (تاريخ التعديل) بدون تجميد الـ UI
         List<Map<String, dynamic>> fileStats = [];
         for (var file in files) {
           FileStat stat = await file.stat();
           fileStats.add({'file': file, 'date': stat.modified});
         }
 
-        // ترتيب من الأقدم للأحدث
+        // Sort oldest to newest
         fileStats.sort((a, b) => a['date'].compareTo(b['date']));
 
         int toDelete = fileStats.length - maxBackupCount;

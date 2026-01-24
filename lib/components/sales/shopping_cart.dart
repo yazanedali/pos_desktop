@@ -407,7 +407,7 @@ class ShoppingCartState extends State<ShoppingCart> {
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
-                        suffixText: " ₪",
+                        suffixText: "ش",
                         suffixStyle: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -459,7 +459,7 @@ class ShoppingCartState extends State<ShoppingCart> {
                               Icon(Icons.payment, size: 20),
                               SizedBox(width: 8),
                               Text(
-                                "دفع (Space)",
+                                "دفع F4",
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,

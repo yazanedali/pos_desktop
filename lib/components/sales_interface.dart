@@ -16,6 +16,7 @@ import './sales/payment_dialog.dart';
 import 'package:flutter/services.dart';
 import '../../models/customer.dart';
 import '../../database/customer_queries.dart';
+import '../widgets/product_category_filter.dart';
 import 'package:uuid/uuid.dart';
 
 class SalesInterface extends StatefulWidget {
@@ -50,6 +51,7 @@ class _SalesInterfaceState extends State<SalesInterface>
   String _searchTerm = "";
   int? _selectedCategoryId;
   int _refreshKey = 0;
+  bool _showNoBarcode = false; // <-- New filter state
 
   // --- 1. متغيرات الباركود الجديدة (تمت إضافتها) ---
   final TextEditingController _barcodeController = TextEditingController();
@@ -105,6 +107,9 @@ class _SalesInterfaceState extends State<SalesInterface>
 
   final GlobalKey<ProductsTableState> _productsTableKey =
       GlobalKey<ProductsTableState>();
+
+  final GlobalKey<ProductCategoryFilterState> _categoryFilterKey =
+      GlobalKey<ProductCategoryFilterState>();
 
   void _focusSearch() {
     _productsTableKey.currentState?.focusSearch();
@@ -167,6 +172,7 @@ class _SalesInterfaceState extends State<SalesInterface>
         page: _currentPage,
         searchTerm: _searchTerm.isNotEmpty ? _searchTerm : null,
         categoryId: _selectedCategoryId,
+        filterNoBarcode: _showNoBarcode, // <-- Pass filter
       );
 
       for (var product in products) {
@@ -593,12 +599,10 @@ class _SalesInterfaceState extends State<SalesInterface>
             const SingleActivator(LogicalKeyboardKey.f3): () {
               _shoppingCartKey.currentState?.focusNextQuantity();
             },
-            const SingleActivator(LogicalKeyboardKey.space): () {
-              if (FocusManager.instance.primaryFocus?.context?.widget
-                  is! EditableText) {
-                if (_cartItems.isNotEmpty && !_isProcessingSale) {
-                  _handleCheckout();
-                }
+            // F4: للدفع وإتمام البيع
+            const SingleActivator(LogicalKeyboardKey.f4): () {
+              if (_cartItems.isNotEmpty) {
+                _handleCheckout();
               }
             },
           },
@@ -632,9 +636,16 @@ class _SalesInterfaceState extends State<SalesInterface>
                       setState(() {
                         _searchTerm = "";
                         _selectedCategoryId = null;
+                        _showNoBarcode = false;
                       });
                       _loadProducts(reset: true);
                     },
+                    showNoBarcodeFilter: _showNoBarcode,
+                    onNoBarcodeFilterChanged: (val) {
+                      setState(() => _showNoBarcode = val);
+                      _loadProducts(reset: true);
+                    },
+                    categoryFilterKey: _categoryFilterKey,
                   ),
                 ),
 

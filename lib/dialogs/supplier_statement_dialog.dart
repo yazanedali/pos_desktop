@@ -1,9 +1,10 @@
 // dialogs/supplier_statement_dialog.dart
 import 'package:flutter/material.dart';
 import 'package:pos_desktop/models/supplier.dart';
-import 'package:pos_desktop/database/purchase_queries.dart';
-import 'package:pos_desktop/models/purchase_invoice.dart';
-import 'package:pos_desktop/widgets/top_alert.dart';
+import 'package:pos_desktop/database/supplier_queries.dart';
+import 'package:pos_desktop/services/printing_service.dart';
+import 'package:pos_desktop/models/statement_item.dart';
+import 'package:pos_desktop/dialogs/invoice_details_dialog.dart';
 
 class SupplierStatementDialog extends StatefulWidget {
   final Supplier supplier;
@@ -18,13 +19,16 @@ class SupplierStatementDialog extends StatefulWidget {
 class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
   final TextEditingController _dateFromController = TextEditingController();
   final TextEditingController _dateToController = TextEditingController();
-  final PurchaseQueries _purchaseQueries = PurchaseQueries();
+  final SupplierQueries _supplierQueries = SupplierQueries();
 
-  List<PurchaseInvoice> _invoices = [];
+  List<StatementItem> _statementItems = [];
   bool _isLoading = false;
+
+  // Statistics
   double _totalPurchases = 0.0;
   double _totalPaid = 0.0;
-  double _totalRemaining = 0.0;
+  double _finalBalance = 0.0;
+  int _invoiceCount = 0;
 
   @override
   void initState() {
@@ -52,31 +56,42 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
 
     setState(() {
       _isLoading = true;
-      _invoices = [];
+      _statementItems = [];
     });
 
     try {
-      final invoices = await _purchaseQueries.getSupplierStatement(
+      final items = await _supplierQueries.getSupplierDetailedStatement(
         supplierId: widget.supplier.id!,
         startDate: _dateFromController.text,
         endDate: _dateToController.text,
       );
 
-      double totalPurchases = 0.0;
-      double totalPaid = 0.0;
-      double totalRemaining = 0.0;
+      double purchases = 0;
+      double paid = 0;
+      int count = 0;
 
-      for (final invoice in invoices) {
-        totalPurchases += invoice.total;
-        totalPaid += invoice.paidAmount;
-        totalRemaining += invoice.remainingAmount;
+      for (var item in items) {
+        if (item.type == "رصيد سابق") {
+          // لا يضاف للمجاميع لعدم الازدواجية، إلا إذا أردنا عرض "مجموع الفترة"
+        } else if (item.isCredit) {
+          // مشتريات (دين علينا)
+          // ولكن قد يكون "رصيد افتتاحي"
+          if (item.type != "رصيد افتتاحي" && item.type != "رصيد سابق") {
+            purchases += item.amount;
+            count++;
+          }
+        } else {
+          // سداد
+          paid += item.amount;
+        }
       }
 
       setState(() {
-        _invoices = invoices;
-        _totalPurchases = totalPurchases;
-        _totalPaid = totalPaid;
-        _totalRemaining = totalRemaining;
+        _statementItems = items;
+        _totalPurchases = purchases;
+        _totalPaid = paid;
+        _finalBalance = items.isNotEmpty ? items.last.balance : 0.0;
+        _invoiceCount = count;
         _isLoading = false;
       });
     } catch (e) {
@@ -93,12 +108,24 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
     );
   }
 
-  void _printStatement() {
-    TopAlert.showSuccess(
-      // ignore: use_build_context_synchronously
-      context: context,
-      message: "تم إرسال كشف حساب ${widget.supplier.name} للطباعة",
-    );
+  Future<void> _printStatement() async {
+    if (_statementItems.isEmpty) {
+      _showError("لا توجد بيانات للطباعة");
+      return;
+    }
+
+    try {
+      await PrintingService().printStatement(
+        title: "كشف حساب مورد مفصل",
+        entityName: widget.supplier.name,
+        dateRange:
+            "من ${_dateFromController.text} إلى ${_dateToController.text}",
+        items: _statementItems,
+        isSupplier: true,
+      );
+    } catch (e) {
+      _showError("حدث خطأ أثناء الطباعة: $e");
+    }
   }
 
   @override
@@ -140,7 +167,7 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
           ),
         ),
         content: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.8,
+          width: MediaQuery.of(context).size.width * 0.9,
           height: MediaQuery.of(context).size.height * 0.85,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -183,7 +210,7 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
               const SizedBox(height: 16),
 
               // الإحصائيات
-              if (_invoices.isNotEmpty) _buildStatistics(),
+              if (_statementItems.isNotEmpty) _buildStatistics(),
               const SizedBox(height: 16),
 
               // قائمة الفواتير المفصلة
@@ -196,10 +223,13 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                "إجمالي الرصيد المستحق: ${_totalRemaining.toStringAsFixed(2)} شيكل",
+                "الرصيد النهائي: ${_finalBalance.toStringAsFixed(2)} شيكل",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: _totalRemaining > 0 ? Colors.red : Colors.green,
+                  color:
+                      _finalBalance > 0
+                          ? Colors.red
+                          : Colors.green, // أحمر = دين علينا
                   fontSize: 16,
                 ),
               ),
@@ -209,7 +239,7 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Text('إغلاق'),
                   ),
-                  if (_invoices.isNotEmpty)
+                  if (_statementItems.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _printStatement,
                       icon: const Icon(Icons.print),
@@ -319,12 +349,12 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_invoices.isEmpty && _dateFromController.text.isNotEmpty) {
+    if (_statementItems.isEmpty && _dateFromController.text.isNotEmpty) {
       return _buildEmptyState();
     }
 
-    if (_invoices.isNotEmpty) {
-      return _buildDetailedInvoicesList();
+    if (_statementItems.isNotEmpty) {
+      return _buildTransactionsList();
     }
 
     return Center(
@@ -355,10 +385,10 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
         children: [
           _buildStatCard('إجمالي المشتريات', _totalPurchases, Colors.blue),
           _buildStatCard('إجمالي المدفوع', _totalPaid, Colors.green),
-          _buildStatCard('إجمالي المتبقي', _totalRemaining, Colors.red),
+          _buildStatCard('الرصيد النهائي', _finalBalance, Colors.red),
           _buildStatCard(
             'عدد الفواتير',
-            _invoices.length.toDouble(),
+            _invoiceCount.toDouble(),
             Colors.purple,
             isCurrency: false,
           ),
@@ -406,7 +436,7 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
           Icon(Icons.receipt_long, size: 60, color: Colors.grey.shade300),
           const SizedBox(height: 16),
           const Text(
-            'لا توجد فواتير مشتريات في الفترة المحددة',
+            'لا توجد حركات في الفترة المحددة',
             style: TextStyle(fontSize: 16, color: Colors.grey),
           ),
         ],
@@ -414,218 +444,199 @@ class _SupplierStatementDialogState extends State<SupplierStatementDialog> {
     );
   }
 
-  Widget _buildDetailedInvoicesList() {
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 20),
-      itemCount: _invoices.length,
-      itemBuilder: (context, index) {
-        final invoice = _invoices[index];
-        return _buildDetailedInvoiceItem(invoice);
-      },
-    );
-  }
-
-  Widget _buildDetailedInvoiceItem(PurchaseInvoice invoice) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ExpansionTile(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.receipt,
-                color: Colors.orange.shade800,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'فاتورة #${invoice.invoiceNumber}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
-                  Text(
-                    '${invoice.date} | ${invoice.time}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-                ],
-              ),
-            ),
-            _buildStatusBadge(invoice.paymentStatus),
-            const SizedBox(width: 15),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${invoice.total.toStringAsFixed(2)} شيكل',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue,
-                  ),
+  Widget _buildTransactionsList() {
+    return Column(
+      children: [
+        // Header Row
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+          ),
+          child: const Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'التاريخ',
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                if (invoice.remainingAmount > 0)
-                  Text(
-                    'باقي: ${invoice.remainingAmount.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-              ],
-            ),
-          ],
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  'البيان',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'مدين (سداد)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'دائن (شراء)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'الرصيد',
+                  textAlign: TextAlign.end,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
         ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Divider(),
-                const Text(
-                  'تفاصيل المنتجات:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: Colors.grey,
-                  ),
+        // List
+        Expanded(
+          child: ListView.separated(
+            itemCount: _statementItems.length,
+            separatorBuilder: (context, index) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final item = _statementItems[index];
+
+              // في الموردين:
+              // isCredit = True => دائن (دين علينا) => يظهر في عمود الدائن (شراء)
+              // isCredit = False => مدين (سداد منا) => يظهر في عمود المدين (سداد)
+
+              final bool isPurchase = item.isCredit;
+              final bool isPayment = !item.isCredit;
+
+              return Container(
+                color:
+                    index % 2 == 0
+                        ? Colors.white
+                        : Colors.grey[50], // Striped rows
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 8,
                 ),
-                const SizedBox(height: 8),
-                _buildProductsList(invoice.items),
-                if (invoice.notes != null && invoice.notes!.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      "ملاحظات: ${invoice.notes}",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
+                child: Row(
+                  children: [
+                    // Date
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.date, style: const TextStyle(fontSize: 12)),
+                          if (item.invoiceNumber != null)
+                            Text(
+                              "#${item.invoiceNumber}",
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  ),
-                ],
-              ],
-            ),
+                    // Description
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.type,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (item.description.isNotEmpty)
+                            Text(
+                              item.description,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[700],
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Debut (Payment)
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        isPayment ? item.amount.toStringAsFixed(2) : "-",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ),
+                    // Credit (Purchase)
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        isPurchase ? item.amount.toStringAsFixed(2) : "-",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black, // or Red based on preference
+                        ),
+                      ),
+                    ),
+                    // Balance
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        item.balance.toStringAsFixed(2),
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              item.balance > 0
+                                  ? Colors.red
+                                  : Colors.green, // أحمر = مديونية علينا
+                        ),
+                      ),
+                    ),
+                    // Actions
+                    if (isPurchase &&
+                        item.items != null &&
+                        item.items!.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.receipt_long,
+                          size: 20,
+                          color: Colors.blue,
+                        ),
+                        tooltip: "تفاصيل الفاتورة",
+                        // Note: InvoiceDetailsDialog handles SalesInvoiceItem.
+                        // We mapped Purchase items to SaleInvoiceItem, so this might work
+                        // IF InvoiceDetailsDialog doesn't depend on other fields too much.
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => InvoiceDetailsDialog(item: item),
+                          );
+                        },
+                      )
+                    else
+                      const SizedBox(width: 48), // Spacing placeholder
+                  ],
+                ),
+              );
+            },
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusBadge(String status) {
-    Color color;
-    switch (status) {
-      case 'مدفوع':
-        color = Colors.green;
-        break;
-      case 'جزئي':
-        color = Colors.orange;
-        break;
-      case 'غير مدفوع':
-        color = Colors.red;
-        break;
-      default:
-        color = Colors.grey;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.5)),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
         ),
-      ),
-    );
-  }
-
-  Widget _buildProductsList(List<PurchaseInvoiceItem> items) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: items.length,
-        separatorBuilder: (context, index) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          final item = items[index];
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    item.productName,
-                    style: const TextStyle(fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'x${item.quantity}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    item.purchasePrice.toStringAsFixed(2),
-                    style: const TextStyle(fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    '${item.total.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
-                    textAlign: TextAlign.end,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+      ],
     );
   }
 }

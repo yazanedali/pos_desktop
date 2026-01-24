@@ -17,6 +17,8 @@ class SaleInvoice {
   final double originalTotal;
   final String? notes;
   final String? createdAt;
+  final bool isReturn; // <-- NEW
+  final int? parentInvoiceId; // <-- NEW
   final List<SaleInvoiceItem> items; // <-- هون بتكون العناصر
 
   SaleInvoice({
@@ -36,6 +38,8 @@ class SaleInvoice {
     required this.originalTotal,
     this.notes,
     this.createdAt,
+    this.isReturn = false, // Default false
+    this.parentInvoiceId,
     required this.items, // <-- مطلوبة
   });
 
@@ -57,6 +61,8 @@ class SaleInvoice {
       originalTotal: (map['original_total'] as num?)?.toDouble() ?? 0.0,
       notes: map['notes'],
       createdAt: map['created_at'],
+      isReturn: (map['is_return'] as int?) == 1,
+      parentInvoiceId: map['parent_invoice_id'],
       items: [], // <-- بتكون فارغة وبتملأ بعدين
     );
   }
@@ -79,6 +85,8 @@ class SaleInvoice {
       'original_total': originalTotal,
       'notes': notes,
       'created_at': createdAt,
+      'is_return': isReturn ? 1 : 0,
+      'parent_invoice_id': parentInvoiceId,
     };
   }
 }

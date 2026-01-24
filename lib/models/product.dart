@@ -6,6 +6,7 @@ class Product {
   final double price; // سعر البيع
   final double purchasePrice; // سعر الشراء - NEW
   double stock;
+  final double minStock; // <-- الحد الأدنى للمخزون
   final String? barcode;
   List<ProductPackage> packages;
   // Additional barcodes (alternative barcodes) for the same product
@@ -27,6 +28,7 @@ class Product {
     required this.price,
     this.purchasePrice = 0.0, // Default to 0
     this.stock = 0.0,
+    this.minStock = 9.0, // Default to 9 as per user request
     this.barcode,
     this.categoryId, // تمت إضافته للمُنشئ
     this.category,
@@ -45,6 +47,7 @@ class Product {
       'price': price,
       'purchase_price': purchasePrice,
       'stock': stock,
+      'min_stock': minStock,
       'barcode': barcode,
       'category_id': categoryId, // --- تعديل: إرسال الـ ID إلى قاعدة البيانات
       'is_active': isActive ? 1 : 0,
@@ -62,6 +65,7 @@ class Product {
           map['price'] is int ? (map['price'] as int).toDouble() : map['price'],
       purchasePrice: (map['purchase_price'] as num?)?.toDouble() ?? 0.0,
       stock: (map['stock'] as num? ?? 0).toDouble(),
+      minStock: (map['min_stock'] as num? ?? 0).toDouble(),
       barcode: map['barcode'],
       categoryId:
           map['category_id'], // --- تعديل: قراءة الـ ID من قاعدة البيانات
@@ -80,6 +84,7 @@ class Product {
     double? price,
     double? purchasePrice,
     double? stock,
+    double? minStock,
     String? barcode,
     int? categoryId, // تمت إضافته هنا
     String? category,
@@ -95,6 +100,7 @@ class Product {
       price: price ?? this.price,
       purchasePrice: purchasePrice ?? this.purchasePrice,
       stock: stock ?? this.stock,
+      minStock: minStock ?? this.minStock,
       barcode: barcode ?? this.barcode,
       categoryId: categoryId ?? this.categoryId, // تمت إضافته هنا
       category: category ?? this.category,

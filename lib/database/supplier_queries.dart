@@ -3,6 +3,9 @@ import 'package:pos_desktop/database/database_helper.dart';
 import 'package:pos_desktop/models/supplier.dart';
 import 'package:pos_desktop/models/supplier_balance_transaction.dart';
 import 'package:pos_desktop/models/supplier_payment.dart';
+import 'package:pos_desktop/models/statement_item.dart';
+import 'package:pos_desktop/models/sales_invoice.dart'; // For SaleInvoiceItem re-use
+import 'package:pos_desktop/models/purchase_invoice.dart';
 
 class SupplierQueries {
   final DatabaseHelper _dbHelper = DatabaseHelper();
@@ -553,5 +556,206 @@ class SupplierQueries {
     }
 
     return 0;
+  }
+
+  // جلب كشف حساب مفصل للمورد
+  Future<List<StatementItem>> getSupplierDetailedStatement({
+    required int supplierId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final db = await _dbHelper.database;
+    final List<StatementItem> statementItems = [];
+    double runningBalance = 0.0;
+
+    try {
+      // 1. حساب الرصيد الافتتاحي (قبل تاريخ البداية)
+
+      // أ. الديون الحالية للفواتير القديمة
+      final oldInvoicesDebtResult = await db.rawQuery(
+        'SELECT SUM(remaining_amount) as debt FROM purchase_invoices WHERE supplier_id = ? AND date < ?',
+        [supplierId, startDate],
+      );
+      double currentRemainingOnOld =
+          (oldInvoicesDebtResult.first['debt'] as num?)?.toDouble() ?? 0.0;
+
+      // ب. السدادات التي تمت في الفترة لفواتير قديمة
+      final paymentsForOldInvoicesResult = await db.rawQuery(
+        '''
+        SELECT SUM(sp.amount) as paid
+        FROM supplier_payments sp
+        JOIN purchase_invoices pi ON sp.invoice_id = pi.id
+        WHERE pi.supplier_id = ? 
+          AND pi.date < ?       -- الفاتورة قديمة
+          AND sp.payment_date >= ? -- السداد حديث
+        ''',
+        [supplierId, startDate, startDate],
+      );
+      double paymentsInPeriodForOld =
+          (paymentsForOldInvoicesResult.first['paid'] as num?)?.toDouble() ??
+          0.0;
+
+      runningBalance = currentRemainingOnOld + paymentsInPeriodForOld;
+
+      // بند الرصيد الافتتاحي
+      if (runningBalance != 0) {
+        statementItems.add(
+          StatementItem(
+            date: startDate,
+            type: "رصيد سابق",
+            description: "رصيد افتتاحي ما قبل $startDate",
+            amount: runningBalance,
+            balance: runningBalance,
+            isCredit: true, // دين علينا (Credit)
+          ),
+        );
+      }
+
+      // 2. جلب العمليات في الفترة
+      final List<StatementItem> periodItems = [];
+
+      // أ. الفواتير
+      final invoices = await db.query(
+        'purchase_invoices',
+        where: 'supplier_id = ? AND date BETWEEN ? AND ?',
+        whereArgs: [supplierId, startDate, endDate],
+      );
+
+      for (var invMap in invoices) {
+        final invoice = PurchaseInvoice.fromMap(invMap);
+
+        // جلب تفاصيل الفاتورة
+        final itemsData = await db.query(
+          'purchase_invoice_items',
+          where: 'invoice_id = ?',
+          whereArgs: [invoice.id],
+        );
+
+        final List<SaleInvoiceItem> mappedItems =
+            itemsData.map((itemMap) {
+              final pItem = PurchaseInvoiceItem.fromMap(itemMap);
+              // Mapping PurchaseItem to SaleItem for UI reuse
+              return SaleInvoiceItem(
+                invoiceId: invoice.id ?? 0,
+                productId: 0,
+                productName: pItem.productName,
+                price: pItem.purchasePrice,
+                quantity: pItem.quantity,
+                total: pItem.total,
+                unitName: 'وحدة',
+              );
+            }).toList();
+
+        periodItems.add(
+          StatementItem(
+            date: "${invoice.date} ${invoice.time}",
+            invoiceNumber: invoice.invoiceNumber,
+            type: "فاتورة مشتريات",
+            description: "فاتورة رقم ${invoice.invoiceNumber}",
+            amount: invoice.total,
+            balance: 0,
+            isCredit: true, // دين علينا
+            items: mappedItems,
+          ),
+        );
+
+        // ب. الدفع الفوري (غير المسجل في supplier_payments)
+        final linkedPayments = await db.query(
+          'supplier_payments',
+          where: 'invoice_id = ?',
+          whereArgs: [invoice.id],
+        );
+        double linkedTotal = 0.0;
+        for (var lp in linkedPayments) {
+          linkedTotal += (lp['amount'] as num).toDouble();
+        }
+
+        double instantPay = invoice.paidAmount - linkedTotal;
+        // Fix floating point errors
+        if (instantPay < 0.01 && instantPay > -0.01) instantPay = 0;
+
+        if (instantPay > 0) {
+          periodItems.add(
+            StatementItem(
+              date: "${invoice.date} ${invoice.time}",
+              invoiceNumber: invoice.invoiceNumber,
+              type: "سداد فوري",
+              description: "سداد فوري للفاتورة ${invoice.invoiceNumber}",
+              amount: instantPay,
+              balance: 0,
+              isCredit: false, // سداد (Debit)
+            ),
+          );
+        }
+      }
+
+      // ج. السدادات المسجلة
+      final payments = await db.query(
+        'supplier_payments',
+        where: 'supplier_id = ? AND payment_date BETWEEN ? AND ?',
+        whereArgs: [supplierId, startDate, endDate],
+      );
+
+      for (var payMap in payments) {
+        final payment = SupplierPayment.fromMap(payMap);
+
+        if (payment.isOpeningBalance) {
+          // هذا رصيد افتتاحي (دين علينا)
+          // إذا كان داخل الفترة، يجب إضافته كـ فاتورة (Credit)
+          periodItems.add(
+            StatementItem(
+              date: "${payment.paymentDate} ${payment.paymentTime}",
+              type: "رصيد افتتاحي",
+              description: payment.notes ?? "",
+              amount: payment.amount,
+              balance: 0,
+              isCredit: true, // دين علينا
+            ),
+          );
+        } else {
+          // سداد عادي
+          periodItems.add(
+            StatementItem(
+              date: "${payment.paymentDate} ${payment.paymentTime}",
+              type: "سداد",
+              description: payment.notes ?? "دفعة نقدية",
+              amount: payment.amount,
+              balance: 0,
+              isCredit: false, // سداد (Debit)
+            ),
+          );
+        }
+      }
+
+      // 3. ترتيب العمليات زمنياً
+      periodItems.sort((a, b) => a.date.compareTo(b.date));
+
+      // 4. حساب الرصيد التراكمي
+      for (var item in periodItems) {
+        if (item.isCredit) {
+          runningBalance += item.amount; // زاد الدين (علينا)
+        } else {
+          runningBalance -= item.amount; // نقص الدين (دفعنا)
+        }
+
+        statementItems.add(
+          StatementItem(
+            date: item.date,
+            invoiceNumber: item.invoiceNumber,
+            type: item.type,
+            description: item.description,
+            amount: item.amount,
+            balance: runningBalance,
+            isCredit: item.isCredit,
+            items: item.items,
+            isReturn: false, // Explicitly set default
+          ),
+        );
+      }
+    } catch (e) {
+      print("Error getting supplier statement: $e");
+    }
+
+    return statementItems;
   }
 }

@@ -33,6 +33,7 @@ class _ProductDialogState extends State<ProductDialog> {
   late TextEditingController _purchasePriceController;
   late TextEditingController _priceController;
   late TextEditingController _stockController;
+  late TextEditingController _minStockController; // <-- New controller
   late TextEditingController _barcodeController;
   late List<TextEditingController> _additionalBarcodeControllers;
   int? _selectedCategoryId;
@@ -58,6 +59,12 @@ class _ProductDialogState extends State<ProductDialog> {
     _stockController = TextEditingController(
       text: isEditing ? widget.product!.stock.toString() : '0.0',
     );
+    final minStockValue =
+        (isEditing && widget.product!.minStock > 0)
+            ? widget.product!.minStock
+            : 9.0;
+
+    _minStockController = TextEditingController(text: minStockValue.toString());
     _barcodeController = TextEditingController(
       text: isEditing ? widget.product!.barcode : '',
     );
@@ -100,6 +107,7 @@ class _ProductDialogState extends State<ProductDialog> {
     _purchasePriceController.dispose();
     _priceController.dispose();
     _stockController.dispose();
+    _minStockController.dispose();
     _barcodeController.dispose();
     for (var c in _additionalBarcodeControllers) {
       c.dispose();
@@ -207,6 +215,7 @@ class _ProductDialogState extends State<ProductDialog> {
         purchasePrice: double.tryParse(_purchasePriceController.text) ?? 0.0,
         price: double.tryParse(_priceController.text) ?? 0.0,
         stock: double.tryParse(_stockController.text) ?? 0.0,
+        minStock: double.tryParse(_minStockController.text) ?? 0.0,
         barcode:
             _barcodeController.text.isEmpty ? null : _barcodeController.text,
         categoryId: _selectedCategoryId!,
@@ -405,6 +414,21 @@ class _ProductDialogState extends State<ProductDialog> {
           decoration: const InputDecoration(
             labelText: "الكمية بالمخزون",
             prefixIcon: Icon(Icons.inventory_2_outlined),
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,3}')),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // الحد الأدنى للمخزون
+        TextFormField(
+          controller: _minStockController,
+          decoration: const InputDecoration(
+            labelText: "الحد الأدنى للمخزون (للتنبيهات)",
+            prefixIcon: Icon(Icons.notifications_active_outlined),
             border: OutlineInputBorder(),
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),

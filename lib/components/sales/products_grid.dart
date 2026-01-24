@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/category.dart';
 import '../../models/product.dart';
 import 'package:pos_desktop/database/product_queries.dart';
+import '../../widgets/product_category_filter.dart'; // Import reuse widget
 
 class ProductsTable extends StatefulWidget {
   final List<Product> products;
@@ -16,6 +17,10 @@ class ProductsTable extends StatefulWidget {
   final int? selectedCategoryId;
   final String searchTerm;
   final VoidCallback? onClearFilters;
+  // New Callback for No Barcode Filter
+  final Function(bool)? onNoBarcodeFilterChanged;
+  final bool showNoBarcodeFilter;
+  final GlobalKey<ProductCategoryFilterState>? categoryFilterKey;
 
   const ProductsTable({
     super.key,
@@ -30,6 +35,9 @@ class ProductsTable extends StatefulWidget {
     this.selectedCategoryId,
     this.searchTerm = "",
     this.onClearFilters,
+    this.onNoBarcodeFilterChanged,
+    this.showNoBarcodeFilter = false,
+    this.categoryFilterKey,
   });
 
   @override
@@ -42,7 +50,6 @@ class ProductsTableState extends State<ProductsTable> {
   final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounce;
 
-  // اللون البنفسجي الأساسي من الهيدر
   final Color _brandColor = const Color(0xFF4A80F0);
 
   @override
@@ -75,6 +82,7 @@ class ProductsTableState extends State<ProductsTable> {
   void _onSearchChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
+      // Allow spaces in search - don't trim here
       widget.onSearch?.call(value);
     });
   }
@@ -97,14 +105,12 @@ class ProductsTableState extends State<ProductsTable> {
       }
       widget.onProductAdded(productByBarcode);
 
-      // تفريغ الحقل بشكل صريح ومباشر
       _searchController.text = "";
       _searchController.clear();
 
       widget.onClearFilters?.call();
       FocusScope.of(context).requestFocus(_searchFocusNode);
     } else {
-      // إذا لم يكن باركود، نكتفي بالبحث العادي
       widget.onSearch?.call(trimmedValue);
     }
   }
@@ -138,79 +144,97 @@ class ProductsTableState extends State<ProductsTable> {
             ),
             child: Column(
               children: [
-                FocusTraversalOrder(
-                  order: const NumericFocusOrder(1),
-                  child: TextField(
-                    controller: _searchController,
-                    focusNode: _searchFocusNode,
-                    onChanged: _onSearchChanged,
-                    onSubmitted: _handleSubmitted,
-                    style: const TextStyle(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: "بحث...",
-                      prefixIcon: Icon(Icons.search, color: _brandColor),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.qr_code, size: 20),
-                        focusNode: FocusNode(canRequestFocus: false),
-                        onPressed: () {
-                          _searchController.clear();
-                          widget.onClearFilters?.call();
-                          FocusScope.of(context).requestFocus(_searchFocusNode);
-                        },
-                      ),
-                      filled: true,
-                      fillColor: const Color(
-                        0xFFF7FAFC,
-                      ), // خلفية رمادية فاتحة جداً
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(
-                          color: _brandColor.withOpacity(0.1),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FocusTraversalOrder(
+                        order: const NumericFocusOrder(1),
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          onChanged: _onSearchChanged,
+                          onSubmitted: _handleSubmitted,
+                          style: const TextStyle(fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: "بحث...",
+                            prefixIcon: Icon(Icons.search, color: _brandColor),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.qr_code, size: 20),
+                              focusNode: FocusNode(canRequestFocus: false),
+                              onPressed: () {
+                                _searchController.clear();
+                                widget.onClearFilters?.call();
+                                FocusScope.of(
+                                  context,
+                                ).requestFocus(_searchFocusNode);
+                              },
+                            ),
+                            filled: true,
+                            fillColor: const Color(0xFFF7FAFC),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: _brandColor.withOpacity(0.1),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: _brandColor.withOpacity(0.1),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: _brandColor,
+                                width: 1.5,
+                              ),
+                            ),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                              horizontal: 12,
+                            ),
+                          ),
                         ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(
-                          color: _brandColor.withOpacity(0.1),
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: _brandColor, width: 1.5),
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 10,
-                        horizontal: 12,
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    // زر فلتر بدون باركود
+                    FilterChip(
+                      label: const Text(
+                        'بدون باركود',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      selected: widget.showNoBarcodeFilter,
+                      onSelected:
+                          (val) => widget.onNoBarcodeFilterChanged?.call(val),
+                      visualDensity: VisualDensity.compact,
+                      side: BorderSide(color: Colors.purple.withOpacity(0.5)),
+                      checkmarkColor: Colors.purple,
+                      selectedColor: Colors.purple.withOpacity(0.1),
+                      labelStyle: TextStyle(
+                        color:
+                            widget.showNoBarcodeFilter
+                                ? Colors.purple
+                                : Colors.grey[700],
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
-                Focus(
-                  descendantsAreFocusable: false,
-                  skipTraversal: true,
-                  child: SizedBox(
-                    height: 30,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: widget.categories.length + 1,
-                      separatorBuilder: (_, __) => const SizedBox(width: 6),
-                      itemBuilder: (context, index) {
-                        if (index == 0)
-                          return _buildFilterChip(
-                            "الكل",
-                            null,
-                            widget.selectedCategoryId == null,
-                          );
-                        final cat = widget.categories[index - 1];
-                        return _buildFilterChip(
-                          cat.name,
-                          cat.id,
-                          widget.selectedCategoryId == cat.id,
-                        );
-                      },
-                    ),
+
+                // Unified Category Filter
+                SizedBox(
+                  height: 40, // Increased height for better interaction
+                  child: ProductCategoryFilter(
+                    key: widget.categoryFilterKey,
+                    categories: widget.categories,
+                    selectedCategoryId: widget.selectedCategoryId,
+                    onCategorySelected:
+                        (id) => widget.onCategorySelected?.call(id),
                   ),
                 ),
               ],
@@ -255,7 +279,7 @@ class ProductsTableState extends State<ProductsTable> {
           ),
           const Divider(height: 1),
 
-          // 3. قائمة المنتجات (Table Rows)
+          // 3. قائمة المنتجات
           Expanded(
             child: Focus(
               descendantsAreFocusable: false,
@@ -294,42 +318,6 @@ class ProductsTableState extends State<ProductsTable> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, int? id, bool isSelected) {
-    return InkWell(
-      onTap: () => widget.onCategorySelected?.call(id),
-      canRequestFocus: false,
-      borderRadius: BorderRadius.circular(
-        20,
-      ), // تخطي التصنيفات عند التنقل بالـ TAB
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          // استخدام التدرج في حالة الاختيار
-          gradient:
-              isSelected
-                  ? const LinearGradient(
-                    colors: [Color(0xFF4A80F0), Color(0xFF9355F4)],
-                  )
-                  : null,
-          color: isSelected ? null : Colors.white,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected ? Colors.transparent : Colors.grey[300]!,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.grey[700],
-            fontWeight: FontWeight.w600,
-            fontSize: 11,
-          ),
-        ),
       ),
     );
   }

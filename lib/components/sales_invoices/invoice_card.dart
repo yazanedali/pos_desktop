@@ -43,7 +43,7 @@ class InvoiceCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'هل أنت متأكد من أنك تريد إرجاع هذه الفاتورة؟',
+                    'سيتم إنشاء فاتورة مرتجع (قيد عكسي).',
                     style: TextStyle(fontSize: 14),
                   ),
                   const SizedBox(height: 8),
@@ -53,21 +53,19 @@ class InvoiceCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text('• إرجاع جميع المنتجات إلى المخزون'),
-                  const Text('• حذف الفاتورة نهائياً من النظام'),
-                  if (invoice.remainingAmount > 0)
-                    const Text('• إرجاع المبالغ المدفوعة والمديونية'),
+                  const Text('• إرجاع المبالغ المدفوعة (كاش/رصيد)'),
+                  const Text('• تغيير حالة الفاتورة إلى "تم الإرجاع"'),
                   const SizedBox(height: 8),
                   const Text(
-                    '⚠️ لا يمكن التراجع عن هذه العملية',
+                    'هذا الإجراء آمن ومحاسبي.',
                     style: TextStyle(
-                      color: Colors.red,
+                      color: Colors.green,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
-              actionsAlignment:
-                  MainAxisAlignment.start, // يجعل الأزرار من اليمين
+              actionsAlignment: MainAxisAlignment.start,
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -76,10 +74,10 @@ class InvoiceCard extends StatelessWidget {
                 ElevatedButton(
                   onPressed: () => _returnInvoice(context),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
+                    backgroundColor: Colors.orange,
                     foregroundColor: Colors.white,
                   ),
-                  child: const Text('نعم، إرجاع الفاتورة'),
+                  child: const Text('تأكيد الإرجاع'),
                 ),
               ],
             ),
@@ -89,17 +87,17 @@ class InvoiceCard extends StatelessWidget {
 
   void _returnInvoice(BuildContext context) async {
     try {
-      Navigator.pop(context); // إغلاق ديالوج التأكيد
+      Navigator.pop(context);
 
-      // عرض مؤشر تحميل
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => const Center(child: CircularProgressIndicator()),
       );
 
-      // استدعاء خدمة الإرجاع
-      final success = await SalesInvoiceService().returnInvoice(invoice.id!);
+      final success = await SalesInvoiceService().createReturnInvoice(
+        invoice.id!,
+      );
 
       Navigator.pop(context); // إغلاق مؤشر التحميل
 
@@ -213,10 +211,15 @@ class InvoiceCard extends StatelessWidget {
                           ),
                         ),
                         const Spacer(),
-                        if (showReturnButton)
+                        if (showReturnButton &&
+                            !invoice.isReturn &&
+                            invoice.paymentStatus != 'تم الإرجاع')
                           IconButton(
                             onPressed: () => _showReturnConfirmation(context),
-                            icon: const Icon(Icons.reply, color: Colors.red),
+                            icon: const Icon(
+                              Icons.reply,
+                              color: Colors.blue,
+                            ), // غيرت اللون للأزرق ليتناسب مع "انشاء"
                             tooltip: 'إرجاع الفاتورة',
                           ),
                       ],
@@ -347,6 +350,10 @@ class InvoiceCard extends StatelessWidget {
         return Colors.orange;
       case 'غير مدفوع':
         return Colors.red;
+      case 'مرتجع':
+        return Colors.redAccent; // لون فاتورة المرتجع نفسها
+      case 'تم الإرجاع':
+        return Colors.grey; // لون الفاتورة الأصلية التي تم إرجاعها
       default:
         return Colors.grey;
     }

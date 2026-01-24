@@ -26,6 +26,7 @@ class ProductQueries {
     String? searchTerm,
     int? categoryId,
     String? stockFilter,
+    bool? filterNoBarcode,
   }) async {
     final db = await dbHelper.database;
 
@@ -63,6 +64,10 @@ class ProductQueries {
           conditions.add('p.stock > 0');
           break;
       }
+    }
+
+    if (filterNoBarcode == true) {
+      conditions.add("(p.barcode IS NULL OR p.barcode = '')");
     }
 
     final whereClause = conditions.join(' AND ');
@@ -206,6 +211,7 @@ class ProductQueries {
         'price': product.price,
         'purchase_price': product.purchasePrice,
         'stock': product.stock,
+        'min_stock': product.minStock,
         'barcode': product.barcode,
         'category_id': product.categoryId,
       });
@@ -254,6 +260,7 @@ class ProductQueries {
           'price': product.price,
           'purchase_price': product.purchasePrice,
           'stock': product.stock,
+          'min_stock': product.minStock,
           'barcode': product.barcode,
           'category_id': product.categoryId,
           'updated_at': DateTime.now().toIso8601String(),
@@ -404,6 +411,7 @@ class ProductQueries {
     String? searchTerm,
     int? categoryId,
     String? stockFilter, // 'out', 'low', 'in'
+    bool? filterNoBarcode,
   }) async {
     final db = await dbHelper.database;
     final offset = (page - 1) * pageSize;
@@ -443,6 +451,10 @@ class ProductQueries {
       }
     }
 
+    if (filterNoBarcode == true) {
+      conditions.add("(p.barcode IS NULL OR p.barcode = '')");
+    }
+
     final whereClause = conditions.join(' AND ');
 
     final results = await db.rawQuery('''
@@ -479,6 +491,7 @@ class ProductQueries {
     String? searchTerm,
     int? categoryId,
     String? stockFilter,
+    bool? filterNoBarcode,
   }) async {
     final db = await dbHelper.database;
 
@@ -515,6 +528,10 @@ class ProductQueries {
           conditions.add('p.stock > 0');
           break;
       }
+    }
+
+    if (filterNoBarcode == true) {
+      conditions.add("(p.barcode IS NULL OR p.barcode = '')");
     }
 
     final whereClause = conditions.join(' AND ');
@@ -590,5 +607,46 @@ class ProductQueries {
       }
     }
     return products;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stock Alerts Logic
+  // ---------------------------------------------------------------------------
+
+  /// جلب المنتجات التي وصلت للحد الأدنى للمخزون
+  Future<List<Product>> getLowStockProducts() async {
+    final db = await dbHelper.database;
+    final results = await db.rawQuery('''
+      SELECT 
+        p.id,
+        p.name,
+        p.price,
+        p.purchase_price,
+        p.stock,
+        p.min_stock, -- التأكد من جلب هذا العمود
+        p.barcode,
+        p.category_id,
+        c.name as category,
+        c.color as category_color
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE p.is_active = 1 
+      AND p.stock <= p.min_stock
+      ORDER BY p.stock ASC
+    ''');
+
+    return results.map((map) => Product.fromMap(map)).toList();
+  }
+
+  /// الحصول على عدد التنبيهات فقط
+  Future<int> getLowStockCount() async {
+    final db = await dbHelper.database;
+    final result = await db.rawQuery('''
+      SELECT COUNT(*) as count 
+      FROM products 
+      WHERE is_active = 1 
+      AND stock <= min_stock
+    ''');
+    return result.first['count'] as int? ?? 0;
   }
 }

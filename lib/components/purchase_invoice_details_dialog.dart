@@ -6,12 +6,14 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
   final PurchaseInvoice invoice;
   final List<Category> categories;
   final Function() onClose;
+  final Function() onPrint;
 
   const PurchaseInvoiceDetailsDialog({
     super.key,
     required this.invoice,
     required this.categories,
     required this.onClose,
+    required this.onPrint,
   });
 
   Color _hexToColor(String hex) {
@@ -385,31 +387,59 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
 
                 const SizedBox(height: 20),
 
-                // 5. زر الإغلاق
-                SizedBox(
-                  width: double.infinity,
-                  height: 45,
-                  child: OutlinedButton.icon(
-                    onPressed: onClose,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.grey),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                // 5. أزرار الإجراءات
+                Row(
+                  children: [
+                    // زر الطباعة
+                    Expanded(
+                      child: SizedBox(
+                        height: 45,
+                        child: ElevatedButton.icon(
+                          onPressed: onPrint,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(Icons.print_outlined, size: 20),
+                          label: const Text(
+                            "طباعة الفاتورة",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ),
                     ),
-                    icon: const Icon(
-                      Icons.close,
-                      size: 20,
-                      color: Colors.black,
-                    ),
-                    label: const Text(
-                      "إغلاق الفاتورة",
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 12),
+                    // زر الإغلاق
+                    Expanded(
+                      child: SizedBox(
+                        height: 45,
+                        child: OutlinedButton.icon(
+                          onPressed: onClose,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.grey),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.close,
+                            size: 20,
+                            color: Colors.black,
+                          ),
+                          label: const Text(
+                            "إغلاق",
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),

@@ -45,6 +45,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
   // متغيرات الفلترة
   int? _selectedCategoryId;
   StockFilterOption _selectedStockFilter = StockFilterOption.all;
+  bool _showNoBarcode = false; // <-- تمت الإضافة
 
   // متغيرات للإحصائيات
   double _totalPurchaseValue = 0.0;
@@ -126,6 +127,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
             _searchController.text.isNotEmpty ? _searchController.text : null,
         categoryId: _selectedCategoryId,
         stockFilter: stockFilter,
+        filterNoBarcode: _showNoBarcode, // <-- تمرير الفلتر
       );
 
       // الحصول على العدد الكلي للمنتجات (مع الفلترة)
@@ -134,6 +136,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
             _searchController.text.isNotEmpty ? _searchController.text : null,
         categoryId: _selectedCategoryId,
         stockFilter: stockFilter,
+        filterNoBarcode: _showNoBarcode, // <-- تمرير الفلتر
       );
 
       // الحصول على إجمالي سعر الشراء لجميع المنتجات (مع الفلاتر)
@@ -142,6 +145,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
             _searchController.text.isNotEmpty ? _searchController.text : null,
         categoryId: _selectedCategoryId,
         stockFilter: stockFilter,
+        filterNoBarcode: _showNoBarcode, // <-- تمرير الفلتر
       );
 
       if (!mounted) return;
@@ -287,6 +291,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
     setState(() {
       _selectedCategoryId = null;
       _selectedStockFilter = StockFilterOption.all;
+      _showNoBarcode = false; // <-- إعادة التعيين
       _searchController.clear();
     });
     _loadProducts(reset: true);
@@ -566,56 +571,90 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children:
-                  StockFilterOption.values.map((option) {
-                    bool isSelected = _selectedStockFilter == option;
-                    Color color;
+              children: [
+                ...StockFilterOption.values.map((option) {
+                  bool isSelected = _selectedStockFilter == option;
+                  Color color;
 
-                    switch (option) {
-                      case StockFilterOption.outOfStock:
-                        color = Colors.red;
-                        break;
-                      case StockFilterOption.lowStock:
-                        color = Colors.orange;
-                        break;
-                      case StockFilterOption.inStock:
-                        color = Colors.green;
-                        break;
-                      default:
-                        color = Colors.blue;
-                    }
+                  switch (option) {
+                    case StockFilterOption.outOfStock:
+                      color = Colors.red;
+                      break;
+                    case StockFilterOption.lowStock:
+                      color = Colors.orange;
+                      break;
+                    case StockFilterOption.inStock:
+                      color = Colors.green;
+                      break;
+                    default:
+                      color = Colors.blue;
+                  }
 
-                    return FilterChip(
-                      label: Text(option.label),
-                      selected: isSelected,
-                      onSelected: (selected) {
-                        setState(() {
-                          _selectedStockFilter = option;
-                        });
-                        _loadProducts(reset: true);
-                      },
-                      backgroundColor:
-                          isSelected ? color.withOpacity(0.2) : Colors.white,
-                      selectedColor: color.withOpacity(0.3),
-                      checkmarkColor: color,
-                      labelStyle: TextStyle(
-                        color: isSelected ? color : Colors.grey[700],
-                        fontWeight: FontWeight.bold,
+                  return FilterChip(
+                    label: Text(option.label),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedStockFilter = option;
+                      });
+                      _loadProducts(reset: true);
+                    },
+                    backgroundColor:
+                        isSelected ? color.withOpacity(0.2) : Colors.white,
+                    selectedColor: color.withOpacity(0.3),
+                    checkmarkColor: color,
+                    labelStyle: TextStyle(
+                      color: isSelected ? color : Colors.grey[700],
+                      fontWeight: FontWeight.bold,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: isSelected ? color : Colors.grey[300]!,
+                        width: 1,
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        side: BorderSide(
-                          color: isSelected ? color : Colors.grey[300]!,
-                          width: 1,
-                        ),
-                      ),
-                      avatar: Icon(
-                        _getStockFilterIcon(option),
-                        size: 16,
-                        color: isSelected ? color : Colors.grey,
-                      ),
-                    );
-                  }).toList(),
+                    ),
+                    avatar: Icon(
+                      _getStockFilterIcon(option),
+                      size: 16,
+                      color: isSelected ? color : Colors.grey,
+                    ),
+                  );
+                }),
+                // زر فلتر "بدون باركود"
+                FilterChip(
+                  label: const Text("بدون باركود"),
+                  selected: _showNoBarcode,
+                  onSelected: (selected) {
+                    setState(() {
+                      _showNoBarcode = selected;
+                    });
+                    _loadProducts(reset: true);
+                  },
+                  backgroundColor:
+                      _showNoBarcode
+                          ? Colors.purple.withOpacity(0.2)
+                          : Colors.white,
+                  selectedColor: Colors.purple.withOpacity(0.3),
+                  checkmarkColor: Colors.purple,
+                  labelStyle: TextStyle(
+                    color: _showNoBarcode ? Colors.purple : Colors.grey[700],
+                    fontWeight: FontWeight.bold,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(
+                      color: _showNoBarcode ? Colors.purple : Colors.grey[300]!,
+                      width: 1,
+                    ),
+                  ),
+                  avatar: Icon(
+                    Icons.qr_code_scanner_outlined,
+                    size: 16,
+                    color: _showNoBarcode ? Colors.purple : Colors.grey,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
