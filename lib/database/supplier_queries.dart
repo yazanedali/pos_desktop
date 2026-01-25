@@ -643,6 +643,7 @@ class SupplierQueries {
                 quantity: pItem.quantity,
                 total: pItem.total,
                 unitName: 'وحدة',
+                discount: pItem.discount,
               );
             }).toList();
 
@@ -651,11 +652,15 @@ class SupplierQueries {
             date: "${invoice.date} ${invoice.time}",
             invoiceNumber: invoice.invoiceNumber,
             type: "فاتورة مشتريات",
-            description: "فاتورة رقم ${invoice.invoiceNumber}",
+            description:
+                invoice.discount > 0
+                    ? "فاتورة رقم ${invoice.invoiceNumber} (خصم: ${invoice.discount.toStringAsFixed(2)})"
+                    : "فاتورة رقم ${invoice.invoiceNumber}",
             amount: invoice.total,
             balance: 0,
             isCredit: true, // دين علينا
             items: mappedItems,
+            invoiceDiscount: invoice.discount > 0 ? invoice.discount : null,
           ),
         );
 
@@ -697,6 +702,10 @@ class SupplierQueries {
       );
 
       for (var payMap in payments) {
+        // Skip payments that are linked to an invoice because they are
+        // already added as linked payments when iterating invoices.
+        if (payMap['invoice_id'] != null) continue;
+
         final payment = SupplierPayment.fromMap(payMap);
 
         if (payment.isOpeningBalance) {

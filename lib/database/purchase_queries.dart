@@ -125,11 +125,22 @@ class PurchaseQueries {
   }) async {
     final db = await dbHelper.database;
 
+    // Recompute total from items and invoice.discount to ensure consistency
+    final double computedSubtotal = invoice.items.fold(
+      0.0,
+      (sum, it) => sum + it.total,
+    );
+    final double computedNetTotal = (computedSubtotal - (invoice.discount));
+
+    final PurchaseInvoice invoiceToStore = invoice.copyWith(
+      total: computedNetTotal < 0 ? 0.0 : computedNetTotal,
+    );
+
     await db.transaction((txn) async {
       // إدخال الفاتورة الرئيسية
       final invoiceId = await txn.insert(
         'purchase_invoices',
-        invoice.toMap(),
+        invoiceToStore.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
@@ -171,7 +182,7 @@ class PurchaseQueries {
     // تحديث تنبيهات المخزون بعد إضافة الفاتورة
     StockAlertService().checkAlerts();
 
-    return invoice;
+    return invoiceToStore;
   }
 
   // ========== دالة تعديل فاتورة شراء (محدثة - إصلاح مشكلة القفل Database Locked) ==========
@@ -200,7 +211,13 @@ class PurchaseQueries {
       }
 
       // 2. تجهيز المتغيرات الجديدة
-      double newNetTotal = invoice.total;
+      // Recompute net total from current items and invoice.discount to avoid mismatch
+      final double recomputedSubtotal = invoice.items.fold(
+        0.0,
+        (sum, it) => sum + it.total,
+      );
+      double newNetTotal = recomputedSubtotal - invoice.discount;
+      if (newNetTotal < 0) newNetTotal = 0.0;
       double finalPaidAmount = invoice.paidAmount;
       double finalRemainingAmount = invoice.remainingAmount;
       String finalPaymentStatus = invoice.paymentStatus;
@@ -255,6 +272,7 @@ class PurchaseQueries {
       }
 
       PurchaseInvoice finalInvoice = invoice.copyWith(
+        total: newNetTotal,
         paidAmount: finalPaidAmount,
         remainingAmount: finalRemainingAmount,
         paymentStatus: finalPaymentStatus,

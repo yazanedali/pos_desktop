@@ -87,6 +87,7 @@ class PurchaseInvoice {
     double? remainingAmount,
     String? paymentType,
     String? notes,
+    double? discount,
   }) {
     return PurchaseInvoice(
       id: id ?? this.id,
@@ -103,6 +104,7 @@ class PurchaseInvoice {
       remainingAmount: remainingAmount ?? this.remainingAmount,
       paymentType: paymentType ?? this.paymentType,
       notes: notes ?? this.notes,
+      discount: discount ?? this.discount,
     );
   }
 }

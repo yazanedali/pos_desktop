@@ -1884,6 +1884,8 @@ class SalesInvoiceService {
             balance: runningBalance,
             isCredit: item.isCredit,
             isReturn: item.isReturn,
+            items: item.items,
+            invoiceDiscount: item.invoiceDiscount,
           ),
         );
       }

@@ -9,6 +9,7 @@ class StatementItem {
   final double balance;
   final bool isCredit; // True if payment(credit), False if invoice(debit)
   final bool isReturn; // True if return invoice
+  final double? invoiceDiscount; // Optional invoice-level discount
 
   StatementItem({
     required this.date,
@@ -20,6 +21,7 @@ class StatementItem {
     required this.isCredit,
     this.isReturn = false,
     this.items,
+    this.invoiceDiscount,
   });
 
   final List<SaleInvoiceItem>? items;

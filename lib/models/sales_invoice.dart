@@ -102,6 +102,7 @@ class SaleInvoiceItem {
   final double unitQuantity;
   final String unitName;
   final double costPrice; // <-- سعر التكلفة لحظة البيع
+  final double discount; // خصم سطر العنصر (إن وُجد)
 
   SaleInvoiceItem({
     this.id,
@@ -114,12 +115,14 @@ class SaleInvoiceItem {
     this.unitQuantity = 1.0,
     required this.unitName,
     this.costPrice = 0.0, // <-- default
+    this.discount = 0.0,
   });
 
   SaleInvoiceItem copyWith({
     double? quantity,
     double? total,
     double? costPrice,
+    double? discount,
   }) {
     return SaleInvoiceItem(
       id: id,
@@ -132,6 +135,7 @@ class SaleInvoiceItem {
       unitQuantity: unitQuantity,
       unitName: unitName,
       costPrice: costPrice ?? this.costPrice,
+      discount: discount ?? this.discount,
     );
   }
 
@@ -147,6 +151,7 @@ class SaleInvoiceItem {
       unitQuantity: (map['unit_quantity'] as num?)?.toDouble() ?? 1.0,
       unitName: map['unit_name'] ?? 'حبة',
       costPrice: (map['cost_price'] as num?)?.toDouble() ?? 0.0, // <-- read
+      discount: (map['discount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -162,6 +167,7 @@ class SaleInvoiceItem {
       'unit_quantity': unitQuantity,
       'unit_name': unitName,
       'cost_price': costPrice, // <-- write
+      'discount': discount,
     };
   }
 }

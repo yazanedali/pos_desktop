@@ -32,7 +32,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
   final TextEditingController _searchController = TextEditingController();
   List<Customer> _searchResults = [];
   final FocusNode _searchFocusNode = FocusNode();
-  final MenuController _menuController = MenuController(); // إضافة controller
 
   @override
   void initState() {
@@ -127,138 +126,172 @@ class _PaymentDialogState extends State<PaymentDialog> {
     }
   }
 
-  // دالة لبناء القائمة المنسدلة مع البحث
-  Widget _buildSearchableDropdown() {
-    return MenuAnchor(
-      controller: _menuController, // استخدام الـ controller
-      builder: (context, controller, child) {
-        return TextFormField(
-          readOnly: true,
-          controller: TextEditingController(
-            text: _selectedCustomer?.name ?? '',
-          ),
-          decoration: InputDecoration(
-            labelText: 'اختر العميل',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 16,
+  // بناء حقل البحث ونتائج البحث
+  Widget _buildCustomerSelection() {
+    if (_selectedCustomer != null) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade200),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedCustomer!.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      if (_selectedCustomer!.phone != null)
+                        Text(
+                          _selectedCustomer!.phone!,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.clear, size: 18),
+                  onPressed: () {
+                    setState(() {
+                      _selectedCustomer = null;
+                      _searchController.clear();
+                      _searchResults =
+                          _availableCustomers; // إعادة تعيين النتائج
+                    });
+                    // إعادة التركيز لحقل البحث
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _searchFocusNode.requestFocus();
+                    });
+                  },
+                ),
+              ],
             ),
+            // عرض رصيد المحفظة إذا كان الخيار "من الرصيد"
+            if (_paymentMethod == 'من الرصيد') ...[
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("رصيد المحفظة المتاح:"),
+                  Text(
+                    "${_selectedCustomer!.walletBalance.toStringAsFixed(2)} شيكل",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color:
+                          _selectedCustomer!.walletBalance >=
+                                  double.parse(
+                                    _paidAmountController.text.isEmpty
+                                        ? "0"
+                                        : _paidAmountController.text,
+                                  )
+                              ? Colors.green
+                              : Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // حقل البحث
+        TextField(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          autofocus: true, // التركيز التلقائي هنا
+          decoration: InputDecoration(
+            hintText: 'ابحث عن عميل بالاسم أو الهاتف...',
+            border: const OutlineInputBorder(),
+            prefixIcon: const Icon(Icons.search),
             suffixIcon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_selectedCustomer != null)
+                if (_searchController.text.isNotEmpty)
                   IconButton(
                     icon: const Icon(Icons.clear, size: 18),
                     onPressed: () {
-                      setState(() {
-                        _selectedCustomer = null;
-                        _searchController.clear();
-                      });
+                      _searchController.clear();
                     },
                   ),
-                const Icon(Icons.arrow_drop_down, size: 24),
+                // زر إضافة عميل جديد بجانب البحث
+                IconButton(
+                  icon: const Icon(Icons.add_circle, color: Colors.green),
+                  tooltip: 'إضافة عميل جديد',
+                  onPressed: _showAndHandleAddCustomer,
+                ),
               ],
             ),
-          ),
-          onTap: () {
-            if (_menuController.isOpen) {
-              _menuController.close();
-            } else {
-              _menuController.open();
-              // إعطاء التركيز لحقل البحث عند فتح القائمة
-              Future.delayed(const Duration(milliseconds: 100), () {
-                _searchFocusNode.requestFocus();
-              });
-            }
-          },
-          validator: (value) {
-            if (_paymentMethod == 'آجل' && _selectedCustomer == null) {
-              return 'يجب تحديد العميل في البيع الآجل';
-            }
-            return null;
-          },
-        );
-      },
-      menuChildren: [
-        // حقل البحث
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: TextField(
-            controller: _searchController,
-            focusNode: _searchFocusNode,
-            decoration: InputDecoration(
-              hintText: 'ابحث عن عميل...',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon:
-                  _searchController.text.isNotEmpty
-                      ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                        },
-                      )
-                      : null,
-              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
             ),
           ),
         ),
-        const Divider(height: 1),
-        // قائمة العملاء
-        SizedBox(
-          height: 200, // ارتفاع ثابت للقائمة
-          width: 400, // عرض ثابت للقائمة
-          child:
-              _searchResults.isEmpty
-                  ? const Center(
-                    child: Text(
-                      'لا توجد نتائج',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  )
-                  : ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final customer = _searchResults[index];
-                      return ListTile(
-                        leading: const Icon(Icons.person_outline, size: 20),
-                        title: Text(
-                          customer.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle:
-                            customer.phone != null && customer.phone!.isNotEmpty
-                                ? Text(customer.phone!)
-                                : null,
-                        onTap: () {
-                          setState(() {
-                            _selectedCustomer = customer;
-                          });
-                          // ***** إغلاق القائمة تلقائياً عند الاختيار *****
-                          _menuController.close();
-                        },
-                        visualDensity: const VisualDensity(vertical: -4),
-                      );
-                    },
+
+        // نتائج البحث
+        if (_searchResults.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            height: 200,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _searchResults.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final customer = _searchResults[index];
+                return ListTile(
+                  leading: const Icon(Icons.person_outline, size: 20),
+                  title: Text(
+                    customer.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-        ),
-        const Divider(height: 1),
-        // زر إضافة عميل جديد
-        ListTile(
-          leading: const Icon(Icons.add, color: Colors.green, size: 20),
-          title: const Text('إضافة عميل جديد'),
-          onTap: () {
-            // ***** إغلاق القائمة قبل فتح نافذة الإضافة *****
-            _menuController.close();
-            _showAndHandleAddCustomer();
-          },
-          visualDensity: const VisualDensity(vertical: -4),
-        ),
+                  subtitle:
+                      customer.phone != null && customer.phone!.isNotEmpty
+                          ? Text(customer.phone!)
+                          : null,
+                  onTap: () {
+                    setState(() {
+                      _selectedCustomer = customer;
+                    });
+                  },
+                  visualDensity: const VisualDensity(vertical: -2),
+                );
+              },
+            ),
+          ),
+        ] else if (_searchController.text.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              'لا توجد نتائج مطابقة',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -267,8 +300,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 80),
-      contentPadding: const EdgeInsets.all(24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      contentPadding: const EdgeInsets.all(16),
       title: const Row(
         children: [
           Icon(Icons.payment, color: Colors.blue),
@@ -290,7 +323,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
               children: [
                 // إجمالي المبلغ
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -316,14 +349,14 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
                 // طريقة الدفع
                 const Text(
                   'طريقة الدفع:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -361,7 +394,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
-                     Expanded(
+                    Expanded(
                       child: RadioListTile<String>(
                         title: const Text(
                           'من الرصيد',
@@ -372,7 +405,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
                         onChanged: (value) {
                           setState(() {
                             _paymentMethod = value!;
-                            _paidAmountController.text = widget.totalAmount.toStringAsFixed(2);
+                            _paidAmountController.text = widget.totalAmount
+                                .toStringAsFixed(2);
                           });
                         },
                         contentPadding: EdgeInsets.zero,
@@ -380,7 +414,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 12),
 
                 // المبلغ المدفوع
                 TextFormField(
@@ -396,8 +430,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
                             ? Colors.grey[200]
                             : Colors.white,
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
+                      horizontal: 12,
+                      vertical: 12,
                     ),
                   ),
                   keyboardType: TextInputType.number,
@@ -412,101 +446,27 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     if (paid < 0) {
                       return 'المبلغ لا يمكن أن يكون سالباً';
                     }
-                    if (_paymentMethod == 'من الرصيد' && _selectedCustomer != null) {
-                         if (paid > _selectedCustomer!.walletBalance) {
-                           return 'رصيد العميل غير كافي';
-                         }
+                    if (_paymentMethod == 'من الرصيد' &&
+                        _selectedCustomer != null) {
+                      if (paid > _selectedCustomer!.walletBalance) {
+                        return 'رصيد العميل غير كافي';
+                      }
                     }
                     return null;
                   },
                 ),
 
-                if (_paymentMethod == 'آجل' || _paymentMethod == 'من الرصيد') ...[
-                  const SizedBox(height: 20),
+                if (_paymentMethod == 'آجل' ||
+                    _paymentMethod == 'من الرصيد') ...[
+                  const SizedBox(height: 12),
                   const Text(
                     'اختر العميل:',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
 
-                  // استخدام القائمة المنسدلة مع البحث
-                  _buildSearchableDropdown(),
-
-                  if (_selectedCustomer != null) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.green.shade200),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _selectedCustomer!.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    if (_selectedCustomer!.phone != null)
-                                      Text(
-                                        _selectedCustomer!.phone!,
-                                        style: const TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  setState(() {
-                                    _selectedCustomer = null;
-                                    _searchController.clear();
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-                           // عرض رصيد المحفظة إذا كان الخيار "من الرصيد"
-                           if (_paymentMethod == 'من الرصيد') ...[
-                             const Divider(),
-                             Row(
-                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                               children: [
-                                 const Text("رصيد المحفظة المتاح:"),
-                                 Text(
-                                   "${_selectedCustomer!.walletBalance.toStringAsFixed(2)} شيكل",
-                                   style: TextStyle(
-                                     fontWeight: FontWeight.bold,
-                                     color: _selectedCustomer!.walletBalance >= double.parse(_paidAmountController.text.isEmpty ? "0" : _paidAmountController.text) 
-                                         ? Colors.green 
-                                         : Colors.red,
-                                   ),
-                                 ),
-                               ],
-                             ),
-                           ],
-                        ],
-                      ),
-                    ),
-                  ],
+                  // استخدام اختيار العميل المباشر
+                  _buildCustomerSelection(),
                 ],
               ],
             ),

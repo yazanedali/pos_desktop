@@ -19,7 +19,6 @@ class PrintingService {
     pw.Font bold;
 
     try {
-      print("🔄 Loading Arabic fonts...");
       final regularData = await rootBundle.load(
         "assets/fonts/Cairo-Regular.ttf",
       );
@@ -27,15 +26,11 @@ class PrintingService {
 
       regular = pw.Font.ttf(regularData);
       bold = pw.Font.ttf(boldData);
-      print("✅ Loaded local fonts successfully");
     } catch (e) {
-      print("⚠️ Local fonts failed: $e. Using Google Fonts fallback...");
       try {
         regular = await PdfGoogleFonts.cairoRegular();
         bold = await PdfGoogleFonts.cairoBold();
-        print("✅ Loaded Google Fonts successfully");
       } catch (e2) {
-        print("❌ Error loading fonts: $e2");
         regular = pw.Font.courier();
         bold = pw.Font.courier();
       }
@@ -895,30 +890,41 @@ class PrintingService {
     final fonts = await _loadFonts();
     final doc = pw.Document();
 
-    // Calculate Summary
-    // Calculate Summary
+    // Deduplicate duplicate lines anywhere (same date,type,invoiceNumber,amount,description)
+    final List<StatementItem> renderItems = [];
+    final Set<String> seenKeys = {};
+    for (var it in items) {
+      String key;
+      if (it.invoiceNumber != null && it.invoiceNumber!.isNotEmpty) {
+        // Deduplicate primarily by invoice number when available
+        key = '${it.date}|${it.type}|INV:${it.invoiceNumber}|${it.amount}';
+      } else {
+        key =
+            '${it.date}|${it.type}|${it.invoiceNumber ?? ''}|${it.amount}|${it.description}';
+      }
+      if (seenKeys.contains(key)) continue;
+      seenKeys.add(key);
+      renderItems.add(it);
+    }
+
+    // Calculate Summary from deduped list
     double totalSales = 0;
     double totalPayments = 0;
     double totalReturns = 0;
-
-    for (var item in items) {
+    for (var item in renderItems) {
       if (item.isReturn) {
         totalReturns += item.amount;
       } else if (item.isCredit) {
-        // Customer: Credit = Payment
-        // Supplier: Credit = Purchase
         if (isSupplier) {
-          totalSales += item.amount; // Purchase
+          totalSales += item.amount;
         } else {
-          totalPayments += item.amount; // Payment
+          totalPayments += item.amount;
         }
       } else {
-        // Customer: Debit = Sale
-        // Supplier: Debit = Payment
         if (isSupplier) {
-          totalPayments += item.amount; // Payment
+          totalPayments += item.amount;
         } else {
-          totalSales += item.amount; // Sale
+          totalSales += item.amount;
         }
       }
     }
@@ -1070,7 +1076,17 @@ class PrintingService {
                   pw.SizedBox(height: 4),
 
                   // === ITEMS LIST ===
-                  ...items.map((item) {
+                  ...renderItems.map((item) {
+                    final sanitizedDescription =
+                        item.invoiceNumber != null
+                            ? item.description
+                                .replaceAll(
+                                  RegExp(RegExp.escape(item.invoiceNumber!)),
+                                  '',
+                                )
+                                .replaceAll(RegExp(r"[#:]"), '')
+                                .trim()
+                            : item.description;
                     return pw.Container(
                       margin: const pw.EdgeInsets.only(bottom: 6),
                       decoration: const pw.BoxDecoration(
@@ -1100,7 +1116,10 @@ class PrintingService {
                                         fontWeight: pw.FontWeight.bold,
                                       ),
                                     ),
-                                    if (item.invoiceNumber != null)
+                                    if (item.invoiceNumber != null &&
+                                        !item.description.contains(
+                                          item.invoiceNumber!,
+                                        ))
                                       pw.Text(
                                         "#${item.invoiceNumber}",
                                         style: const pw.TextStyle(
@@ -1128,13 +1147,22 @@ class PrintingService {
                                                 : PdfColors.black,
                                       ),
                                     ),
-                                    pw.Text(
-                                      item.description,
-                                      style: const pw.TextStyle(
-                                        fontSize: 7,
-                                        color: PdfColors.grey700,
+                                    // description already rendered above (sanitized)
+                                    if (item.invoiceDiscount != null &&
+                                        item.invoiceDiscount! > 0)
+                                      pw.Padding(
+                                        padding: const pw.EdgeInsets.only(
+                                          top: 2,
+                                        ),
+                                        child: pw.Text(
+                                          'خصم الفاتورة: -${item.invoiceDiscount!.toStringAsFixed(2)}',
+                                          style: pw.TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: pw.FontWeight.bold,
+                                            color: PdfColors.red800,
+                                          ),
+                                        ),
                                       ),
-                                    ),
                                     if (item.items != null &&
                                         item.items!.isNotEmpty)
                                       pw.Container(
@@ -1216,66 +1244,115 @@ class PrintingService {
                                               color: PdfColors.grey300,
                                             ),
                                             ...item.items!.map(
-                                              (prod) => pw.Row(
+                                              (prod) => pw.Column(
+                                                crossAxisAlignment:
+                                                    pw
+                                                        .CrossAxisAlignment
+                                                        .stretch,
                                                 children: [
-                                                  pw.Expanded(
-                                                    flex: 3,
-                                                    child: pw.Text(
-                                                      prod.productName,
-                                                      style: const pw.TextStyle(
-                                                        fontSize: 5,
+                                                  pw.Row(
+                                                    children: [
+                                                      pw.Expanded(
+                                                        flex: 3,
+                                                        child: pw.Text(
+                                                          prod.productName,
+                                                          style:
+                                                              const pw.TextStyle(
+                                                                fontSize: 5,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                      pw.Expanded(
+                                                        flex: 1,
+                                                        child: pw.Text(
+                                                          prod.price
+                                                              .toStringAsFixed(
+                                                                1,
+                                                              ),
+                                                          textAlign:
+                                                              pw
+                                                                  .TextAlign
+                                                                  .center,
+                                                          style:
+                                                              const pw.TextStyle(
+                                                                fontSize: 5,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                      pw.Expanded(
+                                                        flex: 1,
+                                                        child: pw.Text(
+                                                          prod.quantity
+                                                              .toStringAsFixed(
+                                                                1,
+                                                              ),
+                                                          textAlign:
+                                                              pw
+                                                                  .TextAlign
+                                                                  .center,
+                                                          style:
+                                                              const pw.TextStyle(
+                                                                fontSize: 5,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                      pw.Expanded(
+                                                        flex: 1,
+                                                        child: pw.Text(
+                                                          prod.total
+                                                              .toStringAsFixed(
+                                                                1,
+                                                              ),
+                                                          textAlign:
+                                                              pw
+                                                                  .TextAlign
+                                                                  .center,
+                                                          style:
+                                                              const pw.TextStyle(
+                                                                fontSize: 5,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  if (prod.discount > 0)
+                                                    pw.Container(
+                                                      alignment:
+                                                          pw
+                                                              .Alignment
+                                                              .centerRight,
+                                                      padding:
+                                                          const pw.EdgeInsets.only(
+                                                            top: 2,
+                                                            right: 2,
+                                                          ),
+                                                      child: pw.Text(
+                                                        'خصم جزئي: ${prod.discount.toStringAsFixed(2)}',
+                                                        style: pw.TextStyle(
+                                                          fontSize: 7,
+                                                          fontWeight:
+                                                              pw
+                                                                  .FontWeight
+                                                                  .bold,
+                                                          color:
+                                                              PdfColors.red800,
+                                                        ),
                                                       ),
                                                     ),
-                                                  ),
-                                                  pw.Expanded(
-                                                    flex: 1,
-                                                    child: pw.Text(
-                                                      prod.price
-                                                          .toStringAsFixed(1),
-                                                      textAlign:
-                                                          pw.TextAlign.center,
-                                                      style: const pw.TextStyle(
-                                                        fontSize: 5,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  pw.Expanded(
-                                                    flex: 1,
-                                                    child: pw.Text(
-                                                      prod.quantity
-                                                          .toStringAsFixed(1),
-                                                      textAlign:
-                                                          pw.TextAlign.center,
-                                                      style: const pw.TextStyle(
-                                                        fontSize: 5,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  pw.Expanded(
-                                                    flex: 1,
-                                                    child: pw.Text(
-                                                      prod.total
-                                                          .toStringAsFixed(1),
-                                                      textAlign:
-                                                          pw.TextAlign.center,
-                                                      style: const pw.TextStyle(
-                                                        fontSize: 5,
-                                                      ),
-                                                    ),
-                                                  ),
                                                 ],
                                               ),
                                             ),
                                           ],
                                         ),
                                       ),
-                                    pw.Text(
-                                      item.description,
-                                      style: const pw.TextStyle(
-                                        fontSize: 7,
-                                        color: PdfColors.grey700,
+                                    if (sanitizedDescription.isNotEmpty)
+                                      pw.Text(
+                                        sanitizedDescription,
+                                        style: const pw.TextStyle(
+                                          fontSize: 7,
+                                          color: PdfColors.grey700,
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ),
@@ -1345,6 +1422,28 @@ class PrintingService {
                           "إجمالي المدفوعات",
                           totalPayments,
                           isNegative: true,
+                        ),
+                        // إجمالي خصم الفواتير (إن وُجد)
+                        pw.SizedBox(height: 3),
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text(
+                              "إجمالي خصم الفواتير",
+                              style: pw.TextStyle(
+                                fontSize: 9,
+                                color: PdfColors.red800,
+                              ),
+                            ),
+                            pw.Text(
+                              "- ${renderItems.fold<double>(0, (s, it) => s + (it.invoiceDiscount ?? 0)).toStringAsFixed(2)}",
+                              style: pw.TextStyle(
+                                fontSize: 9,
+                                color: PdfColors.red800,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                         pw.Divider(height: 4),
                         pw.Row(
