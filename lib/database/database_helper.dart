@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 14, // changed from 13 to 14 for performance indexes
+      version: 15, // changed from 14 to 15 for Purchase Returns
       onConfigure: (db) async {
         await db.execute('PRAGMA journal_mode=WAL;');
       },
@@ -415,6 +415,24 @@ class DatabaseHelper {
           ''');
 
           print('✅ Performance indexes created successfully');
+        }
+
+        // Migration path: v14 -> v15 (Purchase Returns)
+        if (oldVersion < 15) {
+          // إضافة أعمدة مرتجعات الشراء
+          try {
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN is_return INTEGER DEFAULT 0",
+            );
+            await db.execute(
+              "ALTER TABLE purchase_invoices ADD COLUMN parent_invoice_id INTEGER",
+            );
+            print('✅ Added Purchase Return columns successfully');
+          } catch (e) {
+            print(
+              '⚠️ Error adding purchase return columns (might already exist): $e',
+            );
+          }
         }
       },
     );

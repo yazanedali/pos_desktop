@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/purchase_invoice.dart';
 import '../models/category.dart';
+import '../dialogs/purchase_return_dialog.dart';
 
 class PurchaseInvoiceDetailsDialog extends StatelessWidget {
   final PurchaseInvoice invoice;
@@ -390,6 +391,44 @@ class PurchaseInvoiceDetailsDialog extends StatelessWidget {
                 // 5. أزرار الإجراءات
                 Row(
                   children: [
+                    // زر استرجاع (يظهر فقط إذا لم تكن الفاتورة مرتجع)
+                    if (!invoice.isReturn) ...[
+                      Expanded(
+                        child: SizedBox(
+                          height: 45,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder:
+                                    (ctx) => PurchaseReturnDialog(
+                                      originalInvoice: invoice,
+                                      onReturnCompleted: () {
+                                        // نغلق الديالوج الحالي (تفاصيل الفاتورة) لنعود للقائمة وتحديثها
+                                        // أو يمكننا فقط استدعاء onClose لتحديث الأب
+                                        onClose();
+                                      },
+                                    ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.assignment_return, size: 20),
+                            label: const Text(
+                              "مرتجع شراء",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+
                     // زر الطباعة
                     Expanded(
                       child: SizedBox(

@@ -271,8 +271,8 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
     }
   }
 
-  void _showInvoiceDetails(PurchaseInvoice invoice) {
-    showDialog(
+  void _showInvoiceDetails(PurchaseInvoice invoice) async {
+    await showDialog(
       context: context,
       builder:
           (context) => PurchaseInvoiceDetailsDialog(
@@ -285,6 +285,7 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
             },
           ),
     );
+    _refreshData();
   }
 
   // --- بناء الواجهة ---
@@ -607,6 +608,11 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
         statusText = 'غير مدفوع';
         statusIcon = Icons.pending;
         break;
+      case 'مرتجع':
+        statusColor = Colors.deepOrange;
+        statusText = 'مرتجع';
+        statusIcon = Icons.assignment_return;
+        break;
       default:
         statusColor = Colors.grey;
         statusText = 'غير معروف';
@@ -885,9 +891,16 @@ class _PurchaseInvoicesState extends State<PurchaseInvoices> {
                   const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.edit, size: 20),
-                    onPressed: () => _showEditInvoiceDialog(invoice),
-                    color: Colors.orange,
-                    tooltip: 'تعديل الفاتورة',
+                    // لا نسمح بتعديل فاتورة المرتجع
+                    onPressed:
+                        invoice.isReturn
+                            ? null
+                            : () => _showEditInvoiceDialog(invoice),
+                    color: invoice.isReturn ? Colors.grey : Colors.orange,
+                    tooltip:
+                        invoice.isReturn
+                            ? 'لا يمكن تعديل المرتجع'
+                            : 'تعديل الفاتورة',
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete, size: 20),

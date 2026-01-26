@@ -14,6 +14,8 @@ class PurchaseInvoice {
   final String paymentType; // 'نقدي', 'آجل', 'من الرصيد'
   final String? notes;
   final double discount;
+  final bool isReturn;
+  final int? parentInvoiceId;
 
   PurchaseInvoice({
     this.id,
@@ -31,6 +33,8 @@ class PurchaseInvoice {
     this.paymentType = 'نقدي',
     this.notes,
     this.discount = 0.0,
+    this.isReturn = false,
+    this.parentInvoiceId,
   });
 
   Map<String, dynamic> toMap() {
@@ -49,6 +53,8 @@ class PurchaseInvoice {
       'payment_type': paymentType,
       'notes': notes,
       'discount': discount,
+      'is_return': isReturn ? 1 : 0,
+      'parent_invoice_id': parentInvoiceId,
     };
   }
 
@@ -69,6 +75,8 @@ class PurchaseInvoice {
       paymentType: map['payment_type'] ?? 'نقدي',
       notes: map['notes'] as String?,
       discount: (map['discount'] as num?)?.toDouble() ?? 0.0,
+      isReturn: (map['is_return'] as int?) == 1,
+      parentInvoiceId: map['parent_invoice_id'] as int?,
     );
   }
 
@@ -88,6 +96,8 @@ class PurchaseInvoice {
     String? paymentType,
     String? notes,
     double? discount,
+    bool? isReturn,
+    int? parentInvoiceId,
   }) {
     return PurchaseInvoice(
       id: id ?? this.id,
@@ -105,6 +115,8 @@ class PurchaseInvoice {
       paymentType: paymentType ?? this.paymentType,
       notes: notes ?? this.notes,
       discount: discount ?? this.discount,
+      isReturn: isReturn ?? this.isReturn,
+      parentInvoiceId: parentInvoiceId ?? this.parentInvoiceId,
     );
   }
 }

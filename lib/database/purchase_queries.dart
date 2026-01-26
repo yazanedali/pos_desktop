@@ -185,7 +185,145 @@ class PurchaseQueries {
     return invoiceToStore;
   }
 
-  // ========== دالة تعديل فاتورة شراء (محدثة - إصلاح مشكلة القفل Database Locked) ==========
+  // ========== دالة إنشاء فاتورة مرتجع شراء ==========
+  Future<PurchaseInvoice> createPurchaseReturn(
+    PurchaseInvoice returnInvoice, {
+    int? originalInvoiceId,
+  }) async {
+    final db = await dbHelper.database;
+
+    // 1. إعادة حساب الإجمالي (للتأكد فقط)
+    final double computedSubtotal = returnInvoice.items.fold(
+      0.0,
+      (sum, it) => sum + it.total,
+    );
+    final double computedNetTotal =
+        (computedSubtotal - (returnInvoice.discount));
+    final PurchaseInvoice invoiceToStore = returnInvoice.copyWith(
+      total: computedNetTotal < 0 ? 0.0 : computedNetTotal,
+      isReturn: true,
+      parentInvoiceId: originalInvoiceId,
+    );
+
+    await db.transaction((txn) async {
+      // 2. إدخال الفاتورة
+      final invoiceId = await txn.insert(
+        'purchase_invoices',
+        invoiceToStore.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      // 3. إدخال العناصر وتحديث المخزون (بالناقص)
+      for (final item in returnInvoice.items) {
+        await txn.insert('purchase_invoice_items', {
+          ...item.toMap(),
+          'invoice_id': invoiceId,
+        });
+
+        // تحديث المخزون: نرسل الكمية بالسالب لخصمها من المخزون
+        await _updateProductStock(
+          txn: txn,
+          barcode: item.barcode,
+          productName: item.productName,
+          quantity: -item.quantity, // <--- هام جداً: بالسالب
+        );
+      }
+
+      // 4. معالجة استرداد الكاش (إذا وجد مدفوع)
+      if (invoiceToStore.paidAmount > 0) {
+        // افتراضياً نرجع للصندوق الرئيسي أو اليومي (يمكن تحسينه لتمرير اسم الصندوق)
+        // سنبحث عن "الصندوق اليومي" أولاً، ثم "الرئيسي"
+        final boxResult = await txn.query(
+          'cash_boxes',
+          where: 'name = ?',
+          whereArgs: ['الصندوق اليومي'],
+          limit: 1,
+        );
+
+        int? boxId;
+        if (boxResult.isNotEmpty) {
+          boxId = boxResult.first['id'] as int;
+        } else {
+          final mainBox = await txn.query(
+            'cash_boxes',
+            where: 'name = ?',
+            whereArgs: ['الصندوق الرئيسي'],
+            limit: 1,
+          );
+          if (mainBox.isNotEmpty) {
+            boxId = mainBox.first['id'] as int;
+          }
+        }
+
+        if (boxId != null) {
+          final now = DateTime.now();
+          final String date =
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+          final String time =
+              "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
+          // تسجيل حركة "دخل" (استرداد نقد من المورد)
+          await txn.insert('cash_movements', {
+            'box_id': boxId,
+            'amount': invoiceToStore.paidAmount,
+            'type': 'مرتجع مشتريات', // نمط ثابت
+            'direction': 'داخل',
+            'notes':
+                'استرداد نقدي لمرتجع شراء #${invoiceToStore.invoiceNumber}',
+            'date': date,
+            'time': time,
+            'related_id': invoiceToStore.invoiceNumber,
+            'created_at': now.toIso8601String(),
+          });
+
+          // زيادة رصيد الصندوق
+          await txn.rawUpdate(
+            'UPDATE cash_boxes SET balance = balance + ? WHERE id = ?',
+            [invoiceToStore.paidAmount, boxId],
+          );
+        }
+      }
+    });
+
+    StockAlertService().checkAlerts();
+    return invoiceToStore;
+  }
+
+  // ========== دالة مساعدة لمعرفة الكميات المرجعة سابقاً لفاتورة معينة ==========
+  Future<Map<String, double>> getReturnedQuantities(int parentInvoiceId) async {
+    final db = await dbHelper.database;
+
+    // جلب كل فواتير المرتجع المرتبطة
+    final returnInvoices = await db.query(
+      'purchase_invoices',
+      columns: ['id'],
+      where: 'parent_invoice_id = ? AND is_return = 1',
+      whereArgs: [parentInvoiceId],
+    );
+
+    if (returnInvoices.isEmpty) return {};
+
+    final List<int> returnIds =
+        returnInvoices.map((e) => e['id'] as int).toList();
+
+    // لا يمكن استخدام WHERE IN مع قائمة فارغة، ولكن تحققنا أعلاه
+    // بناء جملة IN (...)
+    final placeholders = List.filled(returnIds.length, '?').join(',');
+
+    final itemsResult = await db.rawQuery(
+      'SELECT product_name, SUM(quantity) as total_returned FROM purchase_invoice_items WHERE invoice_id IN ($placeholders) GROUP BY product_name',
+      returnIds,
+    );
+
+    final Map<String, double> result = {};
+    for (var row in itemsResult) {
+      result[row['product_name'] as String] =
+          (row['total_returned'] as num).toDouble();
+    }
+
+    return result;
+  }
+
   Future<void> updatePurchaseInvoice(
     PurchaseInvoice invoice, {
     String purchasePriceUpdateMethod = 'جديد',

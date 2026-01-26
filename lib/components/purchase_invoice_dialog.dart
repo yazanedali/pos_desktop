@@ -931,7 +931,7 @@ class _PurchaseInvoiceDialogState extends State<PurchaseInvoiceDialog> {
                           ),
                         ),
                         items:
-                            ['مدفوع', 'جزئي', 'غير مدفوع']
+                            ['مدفوع', 'جزئي', 'غير مدفوع', 'مرتجع']
                                 .map(
                                   (e) => DropdownMenuItem(
                                     value: e,

@@ -571,13 +571,25 @@ class SupplierQueries {
     try {
       // 1. حساب الرصيد الافتتاحي (قبل تاريخ البداية)
 
-      // أ. الديون الحالية للفواتير القديمة
-      final oldInvoicesDebtResult = await db.rawQuery(
-        'SELECT SUM(remaining_amount) as debt FROM purchase_invoices WHERE supplier_id = ? AND date < ?',
+      // أ. الديون الحالية للفواتير القديمة (الشراء العادي - المرتجعات القديمة)
+
+      // شراء عادي
+      final oldPurchaseResult = await db.rawQuery(
+        'SELECT SUM(remaining_amount) as debt FROM purchase_invoices WHERE supplier_id = ? AND date < ? AND (is_return = 0 OR is_return IS NULL)',
         [supplierId, startDate],
       );
-      double currentRemainingOnOld =
-          (oldInvoicesDebtResult.first['debt'] as num?)?.toDouble() ?? 0.0;
+      double debtPurchase =
+          (oldPurchaseResult.first['debt'] as num?)?.toDouble() ?? 0.0;
+
+      // مرتجعات (تخفض الدين)
+      final oldReturnResult = await db.rawQuery(
+        'SELECT SUM(remaining_amount) as credit FROM purchase_invoices WHERE supplier_id = ? AND date < ? AND is_return = 1',
+        [supplierId, startDate],
+      );
+      double creditReturn =
+          (oldReturnResult.first['credit'] as num?)?.toDouble() ?? 0.0;
+
+      double currentRemainingOnOld = debtPurchase - creditReturn;
 
       // ب. السدادات التي تمت في الفترة لفواتير قديمة
       final paymentsForOldInvoicesResult = await db.rawQuery(
@@ -647,22 +659,46 @@ class SupplierQueries {
               );
             }).toList();
 
-        periodItems.add(
-          StatementItem(
-            date: "${invoice.date} ${invoice.time}",
-            invoiceNumber: invoice.invoiceNumber,
-            type: "فاتورة مشتريات",
-            description:
-                invoice.discount > 0
-                    ? "فاتورة رقم ${invoice.invoiceNumber} (خصم: ${invoice.discount.toStringAsFixed(2)})"
-                    : "فاتورة رقم ${invoice.invoiceNumber}",
-            amount: invoice.total,
-            balance: 0,
-            isCredit: true, // دين علينا
-            items: mappedItems,
-            invoiceDiscount: invoice.discount > 0 ? invoice.discount : null,
-          ),
-        );
+        if (invoice.isReturn) {
+          // حالة المرتجع
+          // المبلغ المتبقي (remaining) هو تخفيض للدين (Debit logic in balance, but needs separate handling here)
+          // Paid amount is Cash Refund (Debit logic too, money came in).
+
+          // في كشف الحساب، المرتجع يظهر كحركة عكسية (سداد) بقيمته الإجمالية
+          // أو نفصله: استرداد نقدي + تخفيض دين
+
+          periodItems.add(
+            StatementItem(
+              date: "${invoice.date} ${invoice.time}",
+              invoiceNumber: invoice.invoiceNumber,
+              type: "مرتجع مشتريات",
+              description:
+                  "مرتجع للفاتورة الأصلية #${invoice.parentInvoiceId ?? ' غير محدد'}",
+              amount: invoice.total,
+              balance: 0,
+              isCredit: false, // يقلل الرصيد (مثل السداد)
+              items: mappedItems,
+              isReturn: true,
+            ),
+          );
+        } else {
+          periodItems.add(
+            StatementItem(
+              date: "${invoice.date} ${invoice.time}",
+              invoiceNumber: invoice.invoiceNumber,
+              type: "فاتورة مشتريات",
+              description:
+                  invoice.discount > 0
+                      ? "فاتورة رقم ${invoice.invoiceNumber} (خصم: ${invoice.discount.toStringAsFixed(2)})"
+                      : "فاتورة رقم ${invoice.invoiceNumber}",
+              amount: invoice.total,
+              balance: 0,
+              isCredit: true, // دين علينا
+              items: mappedItems,
+              invoiceDiscount: invoice.discount > 0 ? invoice.discount : null,
+            ),
+          );
+        }
 
         // ب. الدفع الفوري (غير المسجل في supplier_payments)
         final linkedPayments = await db.query(
